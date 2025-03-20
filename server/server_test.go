@@ -1,0 +1,706 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"log"
+	"net/http"
+	"testing"
+)
+
+func TestCreateAndDeleteTable(t *testing.T) {
+	shutdown := startServer()
+	defer shutdown()
+
+	ddb := newDdbClient()
+
+	res, err := createTable(ddb)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if *res.TableDescription.TableName != "movie" {
+		t.Fatalf("Expected table name %s, got %s", "movie", *res.TableDescription.TableName)
+
+	}
+
+	listTablesInput := &dynamodb.ListTablesInput{}
+	listTablesOutput, err := ddb.ListTables(context.Background(), listTablesInput)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if len(listTablesOutput.TableNames) != 1 {
+		t.Fatalf("Expected 1 table, got %d", len(listTablesOutput.TableNames))
+	}
+	if listTablesOutput.TableNames[0] != "movie" {
+		t.Fatalf("Expected table name %s, got %s", "movie", listTablesOutput.TableNames[0])
+	}
+
+	describeTableInput := &dynamodb.DescribeTableInput{
+		TableName: aws.String("movie"),
+	}
+	describeTableOutput, err := ddb.DescribeTable(context.Background(), describeTableInput)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if *describeTableOutput.Table.TableName != "movie" {
+		t.Fatalf("Expected table name %s, got %s", "movie", *describeTableOutput.Table.TableName)
+	}
+
+	deleteTableInput := &dynamodb.DeleteTableInput{
+		TableName: aws.String("movie"),
+	}
+	_, err = ddb.DeleteTable(context.Background(), deleteTableInput)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	_, err = ddb.DescribeTable(context.Background(), describeTableInput)
+	if err == nil {
+		t.Fatalf("Expected error, got nil")
+	} else {
+		var resourceNotFoundException *types.ResourceNotFoundException
+		if !errors.As(err, &resourceNotFoundException) {
+			t.Fatalf("Expected ResourceNotFoundException, got %v", err)
+		}
+	}
+}
+
+func TestPutAndGetAndDeleteItem(t *testing.T) {
+	shutdown := startServer()
+	defer shutdown()
+	ddb := newDdbClient()
+	_, err := createTable(ddb)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	_, err = putItem(ddb)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	getItemInput := &dynamodb.GetItemInput{
+		Key: map[string]types.AttributeValue{
+			"year":  &types.AttributeValueMemberN{Value: "2025"},
+			"title": &types.AttributeValueMemberS{Value: "Hello World"},
+		},
+		TableName: aws.String("movie"),
+	}
+	getItemOutput, err := ddb.GetItem(context.Background(), getItemInput)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if len(getItemOutput.Item) != 0 {
+		t.Fatalf("Expected no items, got %v", len(getItemOutput.Item))
+	}
+
+	getItemInput = &dynamodb.GetItemInput{
+		Key: map[string]types.AttributeValue{
+			"year":  &types.AttributeValueMemberN{Value: "2025"},
+			"title": &types.AttributeValueMemberS{Value: "Hello World"},
+		},
+		TableName:      aws.String("movie"),
+		ConsistentRead: aws.Bool(true),
+	}
+	getItemOutput, err = ddb.GetItem(context.Background(), getItemInput)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if len(getItemOutput.Item) == 0 {
+		t.Fatalf("Expected items, got %v", len(getItemOutput.Item))
+	}
+
+	deleteItemInput := &dynamodb.DeleteItemInput{
+		Key: map[string]types.AttributeValue{
+			"year":  &types.AttributeValueMemberN{Value: "2025"},
+			"title": &types.AttributeValueMemberS{Value: "Hello World"},
+		},
+		TableName: aws.String("movie"),
+	}
+	_, err = ddb.DeleteItem(context.Background(), deleteItemInput)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	getItemInput = &dynamodb.GetItemInput{
+		Key: map[string]types.AttributeValue{
+			"year":  &types.AttributeValueMemberN{Value: "2025"},
+			"title": &types.AttributeValueMemberS{Value: "Hello World"},
+		},
+		TableName:      aws.String("movie"),
+		ConsistentRead: aws.Bool(true),
+	}
+	getItemOutput, err = ddb.GetItem(context.Background(), getItemInput)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if len(getItemOutput.Item) != 0 {
+		t.Fatalf("Expected no item, got %v", len(getItemOutput.Item))
+	}
+
+	getItemInput = &dynamodb.GetItemInput{
+		Key: map[string]types.AttributeValue{
+			"year":  &types.AttributeValueMemberN{Value: "2025"},
+			"title": &types.AttributeValueMemberS{Value: "Hello World"},
+		},
+		TableName: aws.String("movie"),
+	}
+	getItemOutput, err = ddb.GetItem(context.Background(), getItemInput)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if len(getItemOutput.Item) == 0 {
+		t.Fatalf("Expected no items, got %v", len(getItemOutput.Item))
+	}
+}
+
+func TestBatchGetItem(t *testing.T) {
+	shutdown := startServer()
+	defer shutdown()
+	ddb := newDdbClient()
+	_, err := createTable(ddb)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Insert test data
+	items := make([]map[string]types.AttributeValue, 0)
+	for i := 0; i < 4; i++ {
+		putItemInput := &dynamodb.PutItemInput{
+			Item: map[string]types.AttributeValue{
+				"year":        &types.AttributeValueMemberN{Value: "2025"},
+				"title":       &types.AttributeValueMemberS{Value: fmt.Sprintf("Hello World %d", i)},
+				"regionCode":  &types.AttributeValueMemberS{Value: "1"},
+				"countryCode": &types.AttributeValueMemberS{Value: fmt.Sprintf("code%d", i)},
+			},
+			TableName: aws.String("movie"),
+		}
+		items = append(items, putItemInput.Item)
+
+		_, err := ddb.PutItem(context.Background(), putItemInput)
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+		// workaround for the eventual consistency of the local dynamodb
+		_, err = ddb.PutItem(context.Background(), putItemInput)
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+	}
+
+	// Test
+	{
+		input := &dynamodb.BatchGetItemInput{
+			RequestItems: map[string]types.KeysAndAttributes{
+				"movie": {
+					Keys: []map[string]types.AttributeValue{
+						{
+							"year":  &types.AttributeValueMemberN{Value: "2025"},
+							"title": &types.AttributeValueMemberS{Value: "Hello World 0"},
+						},
+						{
+							"year":  &types.AttributeValueMemberN{Value: "2025"},
+							"title": &types.AttributeValueMemberS{Value: "Hello World 1"},
+						},
+					},
+					ConsistentRead: aws.Bool(true),
+				},
+			},
+		}
+		output, err := ddb.BatchGetItem(context.Background(), input)
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+		if len(output.Responses["movie"]) != 2 {
+			t.Fatalf("Expected 2 items, got %d", len(output.Responses["movie"]))
+		}
+
+		for i, actualItem := range output.Responses["movie"] {
+			assertPrimaryKey(actualItem, items[i], t)
+		}
+
+		if len(output.UnprocessedKeys["movie"].Keys) != 0 {
+			t.Fatalf("Expected 0 unprocessed keys, got %d", len(output.UnprocessedKeys["movie"].Keys))
+		}
+	}
+
+	// Test with unprocessed keys
+	{
+		input := &dynamodb.BatchGetItemInput{
+			RequestItems: map[string]types.KeysAndAttributes{
+				"movie": {
+					Keys: []map[string]types.AttributeValue{
+						{
+							"year":  &types.AttributeValueMemberN{Value: "2025"},
+							"title": &types.AttributeValueMemberS{Value: "Hello World 0"},
+						},
+						{
+							"year":  &types.AttributeValueMemberN{Value: "2025"},
+							"title": &types.AttributeValueMemberS{Value: "Hello World 1"},
+						},
+						{
+							"year":  &types.AttributeValueMemberN{Value: "2025"},
+							"title": &types.AttributeValueMemberS{Value: "Hello World 2"},
+						},
+					},
+					ConsistentRead: aws.Bool(true),
+				},
+			},
+		}
+		output, err := ddb.BatchGetItem(context.Background(), input)
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+		if len(output.Responses["movie"]) != 1 {
+			t.Fatalf("Expected 1 items, got %d", len(output.Responses["movie"]))
+		}
+
+		assertPrimaryKey(output.Responses["movie"][0], items[2], t)
+
+		if len(output.UnprocessedKeys["movie"].Keys) != 2 {
+			t.Fatalf("Expected 2 unprocessed keys, got %d", len(output.UnprocessedKeys["movie"].Keys))
+		}
+	}
+
+}
+
+func TestBatchWriteItem(t *testing.T) {
+	shutdown := startServer()
+	defer shutdown()
+	ddb := newDdbClient()
+	_, err := createTable(ddb)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	requests := make([]types.WriteRequest, 0)
+	for i := 0; i < 4; i++ {
+		req := types.WriteRequest{
+			PutRequest: &types.PutRequest{
+				Item: map[string]types.AttributeValue{
+					"year":        &types.AttributeValueMemberN{Value: "2025"},
+					"title":       &types.AttributeValueMemberS{Value: fmt.Sprintf("Hello World %d", i)},
+					"regionCode":  &types.AttributeValueMemberS{Value: "1"},
+					"countryCode": &types.AttributeValueMemberS{Value: fmt.Sprintf("code%d", i)},
+				},
+			},
+		}
+		requests = append(requests, req)
+	}
+
+	{
+		requestItems := make(map[string][]types.WriteRequest)
+		requestItems["movie"] = requests[:2]
+		input := &dynamodb.BatchWriteItemInput{
+			RequestItems: requestItems,
+		}
+
+		output, err := ddb.BatchWriteItem(context.Background(), input)
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+
+		if len(output.UnprocessedItems["movie"]) != 0 {
+			t.Fatalf("Expected 0 unprocessed items, got %d", len(output.UnprocessedItems["movie"]))
+		}
+	}
+
+	{
+		requestItems := make(map[string][]types.WriteRequest)
+		requestItems["movie"] = requests[:4]
+		input := &dynamodb.BatchWriteItemInput{
+			RequestItems: requestItems,
+		}
+
+		output, err := ddb.BatchWriteItem(context.Background(), input)
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+
+		if len(output.UnprocessedItems["movie"]) != 2 {
+			t.Fatalf("Expected 2 unprocessed items, got %d", len(output.UnprocessedItems["movie"]))
+		}
+	}
+
+}
+
+func TestQueryWithGsi(t *testing.T) {
+	shutdown := startServer()
+	defer shutdown()
+	ddb := newDdbClient()
+	_, err := createTable(ddb)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Insert test data
+	items := make([]map[string]types.AttributeValue, 0)
+	for i := 0; i < 4; i++ {
+		putItemInput := &dynamodb.PutItemInput{
+			Item: map[string]types.AttributeValue{
+				"year":        &types.AttributeValueMemberN{Value: "2025"},
+				"title":       &types.AttributeValueMemberS{Value: fmt.Sprintf("Hello World %d", i)},
+				"regionCode":  &types.AttributeValueMemberS{Value: "1"},
+				"countryCode": &types.AttributeValueMemberS{Value: fmt.Sprintf("code%d", i)},
+			},
+			TableName: aws.String("movie"),
+		}
+		items = append(items, putItemInput.Item)
+
+		_, err := ddb.PutItem(context.Background(), putItemInput)
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+		// workaround for the eventual consistency of the local dynamodb
+		_, err = ddb.PutItem(context.Background(), putItemInput)
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+	}
+
+	// Test query with ScanIndexForward true
+	{
+		queryInput := &dynamodb.QueryInput{
+			TableName:              aws.String("movie"),
+			KeyConditionExpression: aws.String("regionCode = :regionCode"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":regionCode": &types.AttributeValueMemberS{Value: "1"},
+			},
+			ScanIndexForward: aws.Bool(true),
+			Limit:            aws.Int32(2),
+			IndexName:        aws.String("regionGSI"),
+		}
+		queryOutput, err := ddb.Query(context.Background(), queryInput)
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+		if len(queryOutput.Items) != 2 {
+			t.Fatalf("Expected 2 items, got %d", len(queryOutput.Items))
+		}
+		assertPrimaryKey(queryOutput.Items[0], items[0], t)
+		assertPrimaryKey(queryOutput.Items[1], items[1], t)
+
+	}
+
+	// Test query with ScanIndexForward false
+	{
+		queryInput := &dynamodb.QueryInput{
+			TableName:              aws.String("movie"),
+			KeyConditionExpression: aws.String("regionCode = :regionCode"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":regionCode": &types.AttributeValueMemberS{Value: "1"},
+			},
+			ScanIndexForward: aws.Bool(false),
+			Limit:            aws.Int32(2),
+			IndexName:        aws.String("regionGSI"),
+		}
+		queryOutput, err := ddb.Query(context.Background(), queryInput)
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+		if len(queryOutput.Items) != 2 {
+			t.Fatalf("Expected 2 items, got %d", len(queryOutput.Items))
+		}
+		assertPrimaryKey(queryOutput.Items[0], items[3], t)
+		assertPrimaryKey(queryOutput.Items[1], items[2], t)
+	}
+
+	// Test query with ExclusiveStartKey
+	{
+		queryInput := &dynamodb.QueryInput{
+			TableName:              aws.String("movie"),
+			KeyConditionExpression: aws.String("regionCode = :regionCode"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":regionCode": &types.AttributeValueMemberS{Value: "1"},
+			},
+			ScanIndexForward: aws.Bool(true),
+			Limit:            aws.Int32(2),
+			IndexName:        aws.String("regionGSI"),
+			ExclusiveStartKey: map[string]types.AttributeValue{
+				"year":  &types.AttributeValueMemberN{Value: "2025"},
+				"title": &types.AttributeValueMemberS{Value: "Hello World 1"},
+			},
+		}
+		queryOutput, err := ddb.Query(context.Background(), queryInput)
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+		if len(queryOutput.Items) != 2 {
+			t.Fatalf("Expected 2 items, got %d", len(queryOutput.Items))
+		}
+		assertPrimaryKey(queryOutput.Items[0], items[2], t)
+		assertPrimaryKey(queryOutput.Items[1], items[3], t)
+	}
+
+	// Test query with SortKeyPredicate
+	{
+		queryInput := &dynamodb.QueryInput{
+			TableName:              aws.String("movie"),
+			KeyConditionExpression: aws.String("regionCode = :regionCode AND countryCode = :countryCode"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":regionCode":  &types.AttributeValueMemberS{Value: "1"},
+				":countryCode": &types.AttributeValueMemberS{Value: "code2"},
+			},
+			ScanIndexForward: aws.Bool(true),
+			Limit:            aws.Int32(2),
+			IndexName:        aws.String("regionGSI"),
+		}
+		queryOutput, err := ddb.Query(context.Background(), queryInput)
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+		if len(queryOutput.Items) != 1 {
+			t.Fatalf("Expected 1 items, got %d", len(queryOutput.Items))
+		}
+		assertPrimaryKey(queryOutput.Items[0], items[2], t)
+	}
+	//{
+	//	partitionKey := []byte("gsiFoo")
+	//	sortKeyPredicate := func(entry *Entry) (bool, error) {
+	//		sortKey, ok := entry.Body["gsi1SortKey"]
+	//		if !ok {
+	//			return false, nil
+	//		}
+	//		return *sortKey.S == "gsiBar2", nil
+	//	}
+	//	req := &Query{
+	//		IndexName:        &gsiName,
+	//		PartitionKey:     &partitionKey,
+	//		ScanIndexForward: true,
+	//		Limit:            2,
+	//		ConsistentRead:   true,
+	//		SortKeyPredicate: (*Predicate)(&sortKeyPredicate),
+	//	}
+	//
+	//	res, err := table.Query(req)
+	//
+	//	if err != nil {
+	//		t.Fatalf("Query failed: %v", err)
+	//	}
+	//	entries := res.Entries
+	//	if len(entries) != 1 {
+	//		t.Fatalf("Query failed: expected 1 entry but got %d", len(entries))
+	//	}
+	//	assertEntry(entries[0], expectedEntries[2], t)
+	//}
+}
+
+func assertPrimaryKey(actual map[string]types.AttributeValue, expected map[string]types.AttributeValue, t *testing.T) {
+	t.Helper()
+	if actual["year"].(*types.AttributeValueMemberN).Value != expected["year"].(*types.AttributeValueMemberN).Value {
+		t.Fatalf("Expected year to be %s, got %s", expected["year"].(*types.AttributeValueMemberN).Value, actual["year"].(*types.AttributeValueMemberN).Value)
+	}
+	if actual["title"].(*types.AttributeValueMemberS).Value != expected["title"].(*types.AttributeValueMemberS).Value {
+		t.Fatalf("Expected title to be %s, got %s", expected["title"].(*types.AttributeValueMemberS).Value, actual["title"].(*types.AttributeValueMemberS).Value)
+	}
+}
+
+func TestQuery(t *testing.T) {
+	shutdown := startServer()
+	defer shutdown()
+	ddb := newDdbClient()
+	_, err := createTable(ddb)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	items := make([]map[string]types.AttributeValue, 0)
+	// Insert test data
+	for i := 0; i < 4; i++ {
+		putItemInput := &dynamodb.PutItemInput{
+			Item: map[string]types.AttributeValue{
+				"year":  &types.AttributeValueMemberN{Value: "2025"},
+				"title": &types.AttributeValueMemberS{Value: fmt.Sprintf("Hello World %d", i)},
+			},
+			TableName: aws.String("movie"),
+		}
+		items = append(items, putItemInput.Item)
+
+		_, err := ddb.PutItem(context.Background(), putItemInput)
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+	}
+
+	// Test query with ScanIndexForward true
+	{
+		queryInput := &dynamodb.QueryInput{
+			TableName:              aws.String("movie"),
+			KeyConditionExpression: aws.String("year = :year"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":year": &types.AttributeValueMemberN{Value: "2025"},
+			},
+			ScanIndexForward: aws.Bool(true),
+			Limit:            aws.Int32(2),
+			ConsistentRead:   aws.Bool(true),
+		}
+
+		queryOutput, err := ddb.Query(context.Background(), queryInput)
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+
+		if len(queryOutput.Items) != 2 {
+			t.Fatalf("Expected 2 items, got %d", len(queryOutput.Items))
+		}
+		assertPrimaryKey(queryOutput.Items[0], items[0], t)
+		assertPrimaryKey(queryOutput.Items[1], items[1], t)
+	}
+
+	// Test query with ScanIndexForward false
+	{
+		queryInput := &dynamodb.QueryInput{
+			TableName:              aws.String("movie"),
+			KeyConditionExpression: aws.String("year = :year"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":year": &types.AttributeValueMemberN{Value: "2025"},
+			},
+			ScanIndexForward: aws.Bool(false),
+			Limit:            aws.Int32(2),
+			ConsistentRead:   aws.Bool(true),
+		}
+
+		queryOutput, err := ddb.Query(context.Background(), queryInput)
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+
+		if len(queryOutput.Items) != 2 {
+			t.Fatalf("Expected 2 items, got %d", len(queryOutput.Items))
+		}
+		assertPrimaryKey(queryOutput.Items[0], items[3], t)
+		assertPrimaryKey(queryOutput.Items[1], items[2], t)
+	}
+
+	// Test query with ExclusiveStartKey
+	{
+		queryInput := &dynamodb.QueryInput{
+			TableName:              aws.String("movie"),
+			KeyConditionExpression: aws.String("year = :year"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":year": &types.AttributeValueMemberN{Value: "2025"},
+			},
+			ScanIndexForward: aws.Bool(true),
+			Limit:            aws.Int32(2),
+			ConsistentRead:   aws.Bool(true),
+			ExclusiveStartKey: map[string]types.AttributeValue{
+				"year":  &types.AttributeValueMemberN{Value: "2025"},
+				"title": &types.AttributeValueMemberS{Value: "Hello World 1"},
+			},
+		}
+
+		queryOutput, err := ddb.Query(context.Background(), queryInput)
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+
+		if len(queryOutput.Items) != 2 {
+			t.Fatalf("Expected 2 items, got %d", len(queryOutput.Items))
+		}
+		assertPrimaryKey(queryOutput.Items[0], items[2], t)
+		assertPrimaryKey(queryOutput.Items[1], items[3], t)
+	}
+}
+
+func putItem(client *dynamodb.Client) (*dynamodb.PutItemOutput, error) {
+	putItemInput := &dynamodb.PutItemInput{
+		Item: map[string]types.AttributeValue{
+			"year":  &types.AttributeValueMemberN{Value: "2025"},
+			"title": &types.AttributeValueMemberS{Value: "Hello World"},
+		},
+		TableName: aws.String("movie"),
+	}
+
+	return client.PutItem(context.Background(), putItemInput)
+}
+
+func createTable(client *dynamodb.Client) (*dynamodb.CreateTableOutput, error) {
+	createTableInput := &dynamodb.CreateTableInput{
+		AttributeDefinitions: []types.AttributeDefinition{{
+			AttributeName: aws.String("year"),
+			AttributeType: types.ScalarAttributeTypeN,
+		}, {
+			AttributeName: aws.String("title"),
+			AttributeType: types.ScalarAttributeTypeS,
+		}, {
+			AttributeName: aws.String("regionCode"),
+			AttributeType: types.ScalarAttributeTypeS,
+		}, {
+			AttributeName: aws.String("countryCode"),
+			AttributeType: types.ScalarAttributeTypeS,
+		},
+		},
+		KeySchema: []types.KeySchemaElement{{
+			AttributeName: aws.String("year"),
+			KeyType:       types.KeyTypeHash,
+		}, {
+			AttributeName: aws.String("title"),
+			KeyType:       types.KeyTypeRange,
+		}},
+		GlobalSecondaryIndexes: []types.GlobalSecondaryIndex{{
+			IndexName: aws.String("regionGSI"),
+			KeySchema: []types.KeySchemaElement{{
+				AttributeName: aws.String("regionCode"),
+				KeyType:       types.KeyTypeHash,
+			}, {
+				AttributeName: aws.String("countryCode"),
+				KeyType:       types.KeyTypeRange,
+			},
+			},
+			Projection: &types.Projection{ProjectionType: types.ProjectionTypeAll},
+		}},
+		TableName:   aws.String("movie"),
+		BillingMode: types.BillingModePayPerRequest,
+	}
+	return client.CreateTable(context.TODO(), createTableInput)
+}
+
+func newDdbClient() *dynamodb.Client {
+	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion("us-west-2"))
+	if err != nil {
+		log.Fatalf("unable to load SDK config, %v", err)
+	}
+
+	// Using the Config value, create the DynamoDB client
+	client := dynamodb.NewFromConfig(cfg, func(options *dynamodb.Options) {
+		options.BaseEndpoint = aws.String("http://localhost:8080")
+	})
+
+	return client
+}
+
+func startServer() func() {
+	svr := NewDdbServer()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", svr.Handler)
+
+	port := 8080
+	server := &http.Server{
+		Addr:    fmt.Sprintf(":%d", port),
+		Handler: mux,
+	}
+
+	log.Printf("baddb server is running on port %d...", port)
+
+	go func() {
+		err := server.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("Server error: %v\n", err)
+		}
+
+	}()
+
+	return func() {
+		err := server.Shutdown(context.Background())
+		if err != nil {
+			log.Printf("Server error: %v\n", err)
+		}
+	}
+}
