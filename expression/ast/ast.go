@@ -3,7 +3,7 @@ package ast
 import (
 	"bytes"
 	"fmt"
-	"github.com/ocowchun/baddb/ddb/expression/token"
+	"github.com/ocowchun/baddb/expression/token"
 	"strings"
 )
 
@@ -166,10 +166,8 @@ type AttributeName interface {
 type SimplePredicateExpression struct {
 	Token         token.Token
 	AttributeName AttributeName
-	//Name                    *Identifier
-	//AttributeNameIdentifier *AttributeNameIdentifier
-	Operator string
-	Value    *AttributeValueIdentifier
+	Operator      string
+	Value         *AttributeValueIdentifier
 }
 
 func (pe *SimplePredicateExpression) PredicateType() PredicateType {
@@ -520,4 +518,272 @@ func (ml *MacroLiteral) String() string {
 	output.WriteString(")")
 	output.WriteString(ml.Body.String())
 	return output.String()
+}
+
+//function ::=
+//    attribute_exists (path)
+//    | attribute_not_exists (path)
+//    | attribute_type (path, type)
+//    | begins_with (path, substr)
+//    | contains (path, operand)
+//    | size (path)
+
+type FunctionExpression interface {
+	functionExpressionNode()
+	String() string
+}
+
+type AttributeExistsFunctionExpression struct {
+	Path Operand
+}
+
+func (fae *AttributeExistsFunctionExpression) functionExpressionNode() {}
+func (fae *AttributeExistsFunctionExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString("attribute_exists(")
+	out.WriteString(fae.Path.String())
+	out.WriteString(")")
+	return out.String()
+}
+
+type AttributeNotExistsFunctionExpression struct {
+	Path Operand
+}
+
+func (fane *AttributeNotExistsFunctionExpression) functionExpressionNode() {}
+func (fane *AttributeNotExistsFunctionExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString("attribute_not_exists(")
+	out.WriteString(fane.Path.String())
+	out.WriteString(")")
+	return out.String()
+}
+
+type AttributeTypeFunctionExpression struct {
+	Path Operand
+	Type string
+}
+
+func (fate *AttributeTypeFunctionExpression) functionExpressionNode() {}
+func (fate *AttributeTypeFunctionExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString("attribute_type(")
+	out.WriteString(fate.Path.String())
+	out.WriteString(", ")
+	out.WriteString(fate.Type)
+	out.WriteString(")")
+	return out.String()
+}
+
+type BeginsWithFunctionExpression struct {
+	Path   Operand
+	Prefix Operand
+}
+
+func (fbw *BeginsWithFunctionExpression) functionExpressionNode() {}
+func (fbw *BeginsWithFunctionExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString("begins_with(")
+	out.WriteString(fbw.Path.String())
+	out.WriteString(", ")
+	out.WriteString(fbw.Prefix.String())
+	out.WriteString(")")
+	return out.String()
+}
+
+type ContainsFunctionExpression struct {
+	Path    Operand
+	Operand Operand
+}
+
+func (fc *ContainsFunctionExpression) functionExpressionNode() {}
+func (fc *ContainsFunctionExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString("contains(")
+	out.WriteString(fc.Path.String())
+	out.WriteString(", ")
+	out.WriteString(fc.Operand.String())
+	out.WriteString(")")
+	return out.String()
+}
+
+type SizeFunctionExpression struct {
+	Path Operand
+}
+
+func (fs *SizeFunctionExpression) functionExpressionNode() {}
+func (fs *SizeFunctionExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString("size(")
+	out.WriteString(fs.Path.String())
+	out.WriteString(")")
+	return out.String()
+}
+
+//condition-expression ::=
+//      operand comparator operand
+//    | operand BETWEEN operand AND operand
+//    | operand IN ( operand (',' operand (, ...) ))
+//    | function
+//    | condition AND condition
+//    | condition OR condition
+//    | NOT condition
+//    | ( condition )
+
+type Operand interface {
+	operandNode()
+	String() string
+}
+
+type AttributeNameOperand struct {
+	Identifier *Identifier
+	HasSharp   bool
+	HasColon   bool
+}
+
+func (aop *AttributeNameOperand) operandNode() {}
+func (aop *AttributeNameOperand) String() string {
+	var out bytes.Buffer
+	if aop.HasSharp {
+		out.WriteString("#")
+	}
+	if aop.HasColon {
+		out.WriteString(":")
+	}
+	out.WriteString(aop.Identifier.String())
+	return out.String()
+}
+
+type IndexOperand struct {
+	Left  Operand
+	Index int
+}
+
+func (iop *IndexOperand) operandNode() {
+
+}
+func (iop *IndexOperand) String() string {
+	return fmt.Sprintf("%s[%d]", iop.Left.String(), iop.Index)
+}
+
+type DotOperand struct {
+	Left  Operand
+	Right Operand
+}
+
+func (dop *DotOperand) operandNode() {}
+func (dop *DotOperand) String() string {
+	return fmt.Sprintf("%s.%s", dop.Left.String(), dop.Right.String())
+}
+
+type ConditionExpression interface {
+	conditionExpressionNode()
+	String() string
+}
+
+type ComparatorConditionExpression struct {
+	Left     Operand
+	Operator string
+	Right    Operand
+}
+
+func (cc *ComparatorConditionExpression) conditionExpressionNode() {}
+func (cc *ComparatorConditionExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString(cc.Left.String())
+	out.WriteString(" ")
+	out.WriteString(cc.Operator)
+	out.WriteString(" ")
+	out.WriteString(cc.Right.String())
+	return out.String()
+}
+
+type BetweenConditionExpression struct {
+	Operand Operand
+	Begin   Operand
+	End     Operand
+}
+
+func (bc *BetweenConditionExpression) conditionExpressionNode() {}
+func (bc *BetweenConditionExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString(bc.Operand.String())
+	out.WriteString(" BETWEEN ")
+	out.WriteString(bc.Begin.String())
+	out.WriteString(" AND ")
+	out.WriteString(bc.End.String())
+	return out.String()
+}
+
+type InConditionExpression struct {
+	Operand Operand
+	Values  []Operand
+}
+
+func (ic *InConditionExpression) conditionExpressionNode() {}
+func (ic *InConditionExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString(ic.Operand.String())
+	out.WriteString(" IN (")
+	for i, v := range ic.Values {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(v.String())
+	}
+	out.WriteString(")")
+	return out.String()
+}
+
+type FunctionConditionExpression struct {
+	Function FunctionExpression
+}
+
+func (fc *FunctionConditionExpression) conditionExpressionNode() {}
+func (fc *FunctionConditionExpression) String() string {
+	return fc.Function.String()
+}
+
+type AndConditionExpression struct {
+	Left  ConditionExpression
+	Right ConditionExpression
+}
+
+func (ac *AndConditionExpression) conditionExpressionNode() {}
+func (ac *AndConditionExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString("(")
+	out.WriteString(ac.Left.String())
+	out.WriteString(" AND ")
+	out.WriteString(ac.Right.String())
+	out.WriteString(")")
+	return out.String()
+}
+
+type OrConditionExpression struct {
+	Left  ConditionExpression
+	Right ConditionExpression
+}
+
+func (oc *OrConditionExpression) conditionExpressionNode() {}
+func (oc *OrConditionExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString("(")
+	out.WriteString(oc.Left.String())
+	out.WriteString(" OR ")
+	out.WriteString(oc.Right.String())
+	out.WriteString(")")
+	return out.String()
+}
+
+type NotConditionExpression struct {
+	Condition ConditionExpression
+}
+
+func (nc *NotConditionExpression) conditionExpressionNode() {}
+func (nc *NotConditionExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString("NOT ")
+	out.WriteString(nc.Condition.String())
+	return out.String()
 }

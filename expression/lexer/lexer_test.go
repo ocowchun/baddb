@@ -1,7 +1,7 @@
 package lexer
 
 import (
-	"github.com/ocowchun/baddb/ddb/expression/token"
+	"github.com/ocowchun/baddb/expression/token"
 	"strings"
 	"testing"
 )

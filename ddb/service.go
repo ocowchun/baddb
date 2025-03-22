@@ -5,18 +5,22 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/ocowchun/baddb/expression"
 	"sync"
 	"time"
 )
 
 type Service struct {
-	tables    map[string]*Table
-	tableLock sync.RWMutex
+	tableLock      sync.RWMutex
+	tableMetadatas map[string]*TableMetaData
+	storage        *InnerStorage
 }
 
 func NewDdbService() *Service {
+	innerStorage := NewInnerStorage()
 	return &Service{
-		tables: make(map[string]*Table),
+		tableMetadatas: make(map[string]*TableMetaData),
+		storage:        innerStorage,
 	}
 }
 
@@ -26,7 +30,7 @@ func (svc *Service) ListTables(ctx context.Context, input *dynamodb.ListTablesIn
 
 	// TODO: implement paging
 	tableNames := make([]string, 0)
-	for tableName, _ := range svc.tables {
+	for tableName, _ := range svc.tableMetadatas {
 		tableNames = append(tableNames, tableName)
 	}
 	output := &dynamodb.ListTablesOutput{
@@ -42,7 +46,7 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 
 	// TODO: add more check
 	tableName := *input.TableName
-	if _, ok := svc.tables[tableName]; ok {
+	if _, ok := svc.tableMetadatas[tableName]; ok {
 		msg := "Cannot create preexisting table"
 		err := &types.ResourceInUseException{
 			Message: &msg,
@@ -51,13 +55,17 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 	}
 
 	now := time.Now()
-	var partitionKeySchema *types.KeySchemaElement
-	var sortKeySchema *types.KeySchemaElement
+	var partitionKeySchema *KeySchema
+	var sortKeySchema *KeySchema
 	for _, keySchema := range input.KeySchema {
 		if keySchema.KeyType == types.KeyTypeHash {
-			partitionKeySchema = &keySchema
+			partitionKeySchema = &KeySchema{
+				AttributeName: *keySchema.AttributeName,
+			}
 		} else {
-			sortKeySchema = &keySchema
+			sortKeySchema = &KeySchema{
+				AttributeName: *keySchema.AttributeName,
+			}
 		}
 	}
 	if partitionKeySchema == nil {
@@ -104,21 +112,27 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 
 	}
 
-	meta := TableMetaData{
+	meta := &TableMetaData{
 		AttributeDefinitions:         input.AttributeDefinitions,
 		GlobalSecondaryIndexSettings: gsiSettings,
 		LocalSecondaryIndexes:        input.LocalSecondaryIndexes,
 		ProvisionedThroughput:        input.ProvisionedThroughput,
 		CreationDateTime:             &now,
-		partitionKeySchema:           partitionKeySchema,
-		sortKeySchema:                sortKeySchema,
+		PartitionKeySchema:           partitionKeySchema,
+		SortKeySchema:                sortKeySchema,
 		Name:                         tableName,
 	}
-	table := NewTable(&meta)
-	svc.tables[tableName] = table
+	//table := NewTable(&meta)
+	err := svc.storage.CreateTable(meta)
+	if err != nil {
+		return nil, err
+	}
+
+	//svc.tables[tableName] = table
+	svc.tableMetadatas[tableName] = meta
 
 	output := dynamodb.CreateTableOutput{
-		TableDescription: table.Description(),
+		TableDescription: meta.Description(),
 	}
 	return &output, nil
 }
@@ -151,7 +165,7 @@ func (svc *Service) BatchGetItem(ctx context.Context, input *dynamodb.BatchGetIt
 	unprocessedKeys := make(map[string]types.KeysAndAttributes)
 
 	for tableName, r := range input.RequestItems {
-		table, ok := svc.tables[tableName]
+		_, ok := svc.tableMetadatas[tableName]
 		if !ok {
 			msg := "Cannot do operations on a non-existent table"
 			err := &types.ResourceNotFoundException{
@@ -180,7 +194,7 @@ func (svc *Service) BatchGetItem(ctx context.Context, input *dynamodb.BatchGetIt
 				ExpressionAttributeNames: r.ExpressionAttributeNames,
 				ProjectionExpression:     r.ProjectionExpression,
 			}
-			item, err := table.Get(getItemInput)
+			item, err := svc.GetItem(ctx, getItemInput)
 			if err != nil {
 				return nil, err
 			}
@@ -229,7 +243,7 @@ func (svc *Service) BatchWriteItem(ctx context.Context, input *dynamodb.BatchWri
 
 	unprocessedItems := make(map[string][]types.WriteRequest)
 	for tableName, requests := range input.RequestItems {
-		table, ok := svc.tables[tableName]
+		_, ok := svc.tableMetadatas[tableName]
 		if !ok {
 			msg := "Cannot do operations on a non-existent table"
 			err := &types.ResourceNotFoundException{
@@ -254,7 +268,7 @@ func (svc *Service) BatchWriteItem(ctx context.Context, input *dynamodb.BatchWri
 					Item:      request.PutRequest.Item,
 					TableName: &tableName,
 				}
-				_, err := table.Put(putItemInput)
+				_, err := svc.PutItem(ctx, putItemInput)
 				if err != nil {
 					return nil, err
 				}
@@ -263,7 +277,7 @@ func (svc *Service) BatchWriteItem(ctx context.Context, input *dynamodb.BatchWri
 					Key:       request.DeleteRequest.Key,
 					TableName: &tableName,
 				}
-				_, err := table.Delete(deleteItemInput)
+				_, err := svc.DeleteItem(ctx, deleteItemInput)
 				if err != nil {
 					return nil, err
 				}
@@ -290,9 +304,16 @@ func (svc *Service) PutItem(ctx context.Context, input *dynamodb.PutItemInput) (
 	defer svc.tableLock.RUnlock()
 
 	tableName := *input.TableName
-	if table, ok := svc.tables[tableName]; ok {
-		fmt.Println("table found")
-		return table.Put(input)
+	if _, ok := svc.tableMetadatas[tableName]; ok {
+		entry := NewEntryFromItem(input.Item)
+
+		req := &PutRequest{
+			Entry:     entry,
+			TableName: tableName,
+		}
+		err := svc.storage.Put(req)
+		//TODO: add PutItemOutput
+		return nil, err
 	} else {
 		fmt.Println("table not found")
 		msg := "Cannot do operations on a non-existent table"
@@ -308,9 +329,18 @@ func (svc *Service) DeleteItem(ctx context.Context, input *dynamodb.DeleteItemIn
 	defer svc.tableLock.RUnlock()
 
 	tableName := *input.TableName
-	if table, ok := svc.tables[tableName]; ok {
-		fmt.Println("table found")
-		return table.Delete(input)
+	if _, ok := svc.tableMetadatas[tableName]; ok {
+		entry := NewEntryFromItem(input.Key)
+
+		req := &DeleteRequest{
+			Entry:     entry,
+			TableName: tableName,
+		}
+
+		err := svc.storage.Delete(req)
+		output := &dynamodb.DeleteItemOutput{}
+
+		return output, err
 	} else {
 		fmt.Println("table not found")
 		msg := "Cannot do operations on a non-existent table"
@@ -326,8 +356,37 @@ func (svc *Service) GetItem(ctx context.Context, input *dynamodb.GetItemInput) (
 	defer svc.tableLock.RUnlock()
 
 	tableName := *input.TableName
-	if table, ok := svc.tables[tableName]; ok {
-		return table.Get(input)
+	if _, ok := svc.tableMetadatas[tableName]; ok {
+
+		consistentRead := false
+		if input.ConsistentRead != nil {
+			consistentRead = *input.ConsistentRead
+		}
+
+		req := &GetRequest{
+			Entry:          NewEntryFromItem(input.Key),
+			ConsistentRead: consistentRead,
+			TableName:      tableName,
+		}
+
+		entry, err := svc.storage.Get(req)
+
+		if err != nil {
+			return nil, err
+		}
+		if entry == nil {
+			output := dynamodb.GetItemOutput{
+				Item: make(map[string]types.AttributeValue),
+			}
+			return &output, nil
+		}
+
+		item := NewItemFromEntry(entry.Body)
+		output := dynamodb.GetItemOutput{
+			Item: item,
+		}
+
+		return &output, nil
 	} else {
 		msg := "Cannot do operations on a non-existent table"
 		err := &types.ResourceNotFoundException{
@@ -350,15 +409,88 @@ func (svc *Service) Query(ctx context.Context, input *dynamodb.QueryInput) (*dyn
 	defer svc.tableLock.RUnlock()
 
 	tableName := *input.TableName
-	if table, ok := svc.tables[tableName]; ok {
-		return table.Query(ctx, input)
-	} else {
+	tableMetadata, ok := svc.tableMetadatas[tableName]
+	if !ok {
 		msg := "Cannot do operations on a non-existent table"
 		err := &types.ResourceNotFoundException{
 			Message: &msg,
 		}
 		return nil, err
 	}
+	if input.KeyConditionExpression == nil {
+		err := &ValidationException{
+			Message: "Either the KeyConditions or KeyConditionExpression parameter must be specified in the request.",
+		}
+		return nil, err
+	}
+
+	keyConditionExpression, err := expression.ParseKeyConditionExpression(*input.KeyConditionExpression)
+	if err != nil {
+		err = &ValidationException{
+			Message: "Invalid KeyConditionExpression: Syntax error;",
+		}
+		return nil, err
+	}
+	expressionAttributeValues := make(map[string]AttributeValue)
+	for k, v := range input.ExpressionAttributeValues {
+		expressionAttributeValues[k] = TransformDdbAttributeValue(v)
+	}
+
+	builder := QueryBuilder{
+		KeyConditionExpression:    keyConditionExpression,
+		ExpressionAttributeValues: expressionAttributeValues,
+		ExpressionAttributeNames:  input.ExpressionAttributeNames,
+		TableMetadata:             tableMetadata,
+		ExclusiveStartKey:         input.ExclusiveStartKey,
+		ConsistentRead:            input.ConsistentRead,
+		Limit:                     input.Limit,
+		IndexName:                 input.IndexName,
+		ScanIndexForward:          input.ScanIndexForward,
+	}
+
+	query, err := builder.BuildQuery()
+	if err != nil {
+		return nil, err
+	}
+	query.TableName = tableName
+
+	res, err := svc.storage.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	entries := res.Entries
+	items := make([]map[string]types.AttributeValue, len(entries))
+	for i, entry := range entries {
+		items[i] = NewItemFromEntry(entry.Body)
+	}
+
+	lastEvaluatedKey := make(map[string]types.AttributeValue)
+	if len(entries) > 0 {
+		lastEntry := entries[len(entries)-1]
+		partitionKeyName := tableMetadata.PartitionKeySchema.AttributeName
+		pk, ok := lastEntry.Body[partitionKeyName]
+		if !ok {
+			return nil, fmt.Errorf("can't found partition key in last entry")
+		}
+		lastEvaluatedKey[partitionKeyName] = pk.ToDdbAttributeValue()
+		if tableMetadata.SortKeySchema != nil {
+			sortKeyName := tableMetadata.SortKeySchema.AttributeName
+			sk, ok := lastEntry.Body[sortKeyName]
+			if !ok {
+				return nil, fmt.Errorf("can't found sort key in last entry")
+			}
+			lastEvaluatedKey[sortKeyName] = sk.ToDdbAttributeValue()
+		}
+	}
+
+	output := &dynamodb.QueryOutput{
+		Count:            int32(len(entries)),
+		Items:            items,
+		LastEvaluatedKey: lastEvaluatedKey,
+		ScannedCount:     res.ScannedCount,
+	}
+
+	return output, nil
 }
 
 func (svc *Service) DeleteTable(ctx context.Context, input *dynamodb.DeleteTableInput) (*dynamodb.DeleteTableOutput, error) {
@@ -366,11 +498,12 @@ func (svc *Service) DeleteTable(ctx context.Context, input *dynamodb.DeleteTable
 	defer svc.tableLock.Unlock()
 
 	tableName := *input.TableName
-	if _, ok := svc.tables[tableName]; ok {
-		table := svc.tables[tableName]
+	if _, ok := svc.tableMetadatas[tableName]; ok {
+		table := svc.tableMetadatas[tableName]
 		tableDescription := table.Description()
-		delete(svc.tables, tableName)
+		delete(svc.tableMetadatas, tableName)
 
+		// TODO: delete from storage
 		output := &dynamodb.DeleteTableOutput{
 			TableDescription: tableDescription,
 		}
@@ -390,8 +523,8 @@ func (svc *Service) DescribeTable(ctx context.Context, input *dynamodb.DescribeT
 	defer svc.tableLock.RUnlock()
 
 	tableName := *input.TableName
-	if _, ok := svc.tables[tableName]; ok {
-		table := svc.tables[tableName]
+	if _, ok := svc.tableMetadatas[tableName]; ok {
+		table := svc.tableMetadatas[tableName]
 		tableDescription := table.Description()
 
 		output := &dynamodb.DescribeTableOutput{
@@ -408,17 +541,63 @@ func (svc *Service) DescribeTable(ctx context.Context, input *dynamodb.DescribeT
 	}
 }
 
-//func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.TransactWriteItemsInput) (*dynamodb.TransactWriteItemsOutput, error) {
-//	// https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_TransactWriteItems.html
-//	svc.tableLock.RLock()
-//	defer svc.tableLock.RUnlock()
-//
-//	for _, writeItem := range input.TransactItems {
-//		//writeItem.
-//		// maybe
-//
-//	}
-//	//table
-//	//svc.tableLock
-//
-//}
+func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.TransactWriteItemsInput) (*dynamodb.TransactWriteItemsOutput, error) {
+	// https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_TransactWriteItems.html
+	svc.tableLock.RLock()
+	defer svc.tableLock.RUnlock()
+
+	txn, err := svc.storage.BeginTxn(false)
+	if err != nil {
+		return nil, err
+	}
+	defer txn.Rollback()
+
+	for _, writeItem := range input.TransactItems {
+		if writeItem.Put != nil {
+			// TODO: handle condition
+			tableName := *writeItem.Put.TableName
+			if _, ok := svc.tableMetadatas[tableName]; !ok {
+				msg := "Cannot do operations on a non-existent table"
+				err = &types.ResourceNotFoundException{
+					Message: &msg,
+				}
+				return nil, err
+			}
+
+			entry := NewEntryFromItem(writeItem.Put.Item)
+			req := &PutRequest{
+				Entry:     entry,
+				TableName: tableName,
+			}
+			err = svc.storage.PutWithTransaction(req, txn)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if writeItem.Delete != nil {
+			tableName := *writeItem.Delete.TableName
+			if _, ok := svc.tableMetadatas[tableName]; !ok {
+				msg := "Cannot do operations on a non-existent table"
+				err = &types.ResourceNotFoundException{
+					Message: &msg,
+				}
+				return nil, err
+			}
+			entry := NewEntryFromItem(writeItem.Delete.Key)
+			req := &DeleteRequest{
+				Entry:     entry,
+				TableName: tableName,
+			}
+			err = svc.storage.DeleteWithTransaction(req, txn)
+			if err != nil {
+				return nil, err
+			}
+
+		}
+
+	}
+	//table
+	//svc.tableLock
+	return nil, fmt.Errorf("unimplemented")
+
+}

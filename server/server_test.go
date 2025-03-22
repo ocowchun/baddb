@@ -609,6 +609,62 @@ func TestQuery(t *testing.T) {
 	}
 }
 
+func TestTransactWriteItems(t *testing.T) {
+	shutdown := startServer()
+	defer shutdown()
+	ddb := newDdbClient()
+	_, err := createTable(ddb)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	input := dynamodb.TransactWriteItemsInput{
+		TransactItems: []types.TransactWriteItem{
+			{
+				Put: &types.Put{
+					Item: map[string]types.AttributeValue{
+						"year":  &types.AttributeValueMemberN{Value: "2025"},
+						"title": &types.AttributeValueMemberS{Value: "Hello World 0"},
+					},
+					TableName: aws.String("movie"),
+				},
+			},
+			{
+				Put: &types.Put{
+					Item: map[string]types.AttributeValue{
+						"year":  &types.AttributeValueMemberN{Value: "2025"},
+						"title": &types.AttributeValueMemberS{Value: "Hello World 1"},
+					},
+					TableName: aws.String("movie"),
+				},
+			},
+		},
+	}
+
+	_, err = ddb.TransactWriteItems(context.Background(), &input)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	for _, item := range input.TransactItems {
+		getItemInput := &dynamodb.GetItemInput{
+			Key: map[string]types.AttributeValue{
+				"year":  &types.AttributeValueMemberN{Value: "2025"},
+				"title": &types.AttributeValueMemberS{Value: item.Put.Item["title"].(*types.AttributeValueMemberS).Value},
+			},
+			TableName:      aws.String("movie"),
+			ConsistentRead: aws.Bool(true),
+		}
+		getItemOutput, err := ddb.GetItem(context.Background(), getItemInput)
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+		if len(getItemOutput.Item) == 2 {
+			t.Fatalf("Expected items, got %v", len(getItemOutput.Item))
+		}
+	}
+}
+
 func putItem(client *dynamodb.Client) (*dynamodb.PutItemOutput, error) {
 	putItemInput := &dynamodb.PutItemInput{
 		Item: map[string]types.AttributeValue{

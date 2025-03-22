@@ -651,3 +651,120 @@ func EncodeDeleteItemOutput(output *dynamodb.DeleteItemOutput) ([]byte, error) {
 	bs, err := json.Marshal(output2)
 	return bs, err
 }
+
+type ConditionCheck struct {
+	ConditionExpression                 *string
+	Key                                 map[string]ddb.AttributeValue
+	TableName                           *string
+	ExpressionAttributeNames            map[string]string
+	ExpressionAttributeValues           map[string]ddb.AttributeValue
+	ReturnValuesOnConditionCheckFailure types.ReturnValuesOnConditionCheckFailure
+}
+type Delete struct {
+	Key                                 map[string]ddb.AttributeValue
+	TableName                           *string
+	ConditionExpression                 *string
+	ExpressionAttributeNames            map[string]string
+	ExpressionAttributeValues           map[string]ddb.AttributeValue
+	ReturnValuesOnConditionCheckFailure types.ReturnValuesOnConditionCheckFailure
+}
+type Put struct {
+	Item                                map[string]ddb.AttributeValue
+	TableName                           *string
+	ConditionExpression                 *string
+	ExpressionAttributeNames            map[string]string
+	ExpressionAttributeValues           map[string]ddb.AttributeValue
+	ReturnValuesOnConditionCheckFailure types.ReturnValuesOnConditionCheckFailure
+}
+
+type Update struct {
+	Key                                 map[string]ddb.AttributeValue
+	TableName                           *string
+	UpdateExpression                    *string
+	ConditionExpression                 *string
+	ExpressionAttributeNames            map[string]string
+	ExpressionAttributeValues           map[string]ddb.AttributeValue
+	ReturnValuesOnConditionCheckFailure types.ReturnValuesOnConditionCheckFailure
+}
+type TransactWriteItem struct {
+	ConditionCheck *ConditionCheck
+	Delete         *Delete
+	Put            *Put
+	Update         *Update
+}
+
+type transactWriteItemsInput struct {
+	TransactItems []TransactWriteItem
+}
+
+func DecodeTransactWriteItemsInput(reader io.ReadCloser) (*dynamodb.TransactWriteItemsInput, error) {
+	defer func() {
+		if err := reader.Close(); err != nil {
+			log.Printf("Error closing request body: %v", err)
+		}
+	}()
+
+	var input2 transactWriteItemsInput
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	err = json.Unmarshal(body, &input2)
+
+	transactItems := make([]types.TransactWriteItem, len(input2.TransactItems))
+	for i, item := range input2.TransactItems {
+		var transactItem types.TransactWriteItem
+		if item.ConditionCheck != nil {
+			transactItem.ConditionCheck = &types.ConditionCheck{
+				ConditionExpression:                 item.ConditionCheck.ConditionExpression,
+				Key:                                 transformToDdbMap(item.ConditionCheck.Key),
+				TableName:                           item.ConditionCheck.TableName,
+				ExpressionAttributeNames:            item.ConditionCheck.ExpressionAttributeNames,
+				ExpressionAttributeValues:           transformToDdbMap(item.ConditionCheck.ExpressionAttributeValues),
+				ReturnValuesOnConditionCheckFailure: item.ConditionCheck.ReturnValuesOnConditionCheckFailure,
+			}
+		}
+		if item.Delete != nil {
+			transactItem.Delete = &types.Delete{
+				Key:                                 transformToDdbMap(item.Delete.Key),
+				TableName:                           item.Delete.TableName,
+				ConditionExpression:                 item.Delete.ConditionExpression,
+				ExpressionAttributeNames:            item.Delete.ExpressionAttributeNames,
+				ExpressionAttributeValues:           transformToDdbMap(item.Delete.ExpressionAttributeValues),
+				ReturnValuesOnConditionCheckFailure: item.Delete.ReturnValuesOnConditionCheckFailure,
+			}
+		}
+		if item.Put != nil {
+			transactItem.Put = &types.Put{
+				Item:                                transformToDdbMap(item.Put.Item),
+				TableName:                           item.Put.TableName,
+				ConditionExpression:                 item.Put.ConditionExpression,
+				ExpressionAttributeNames:            item.Put.ExpressionAttributeNames,
+				ExpressionAttributeValues:           transformToDdbMap(item.Put.ExpressionAttributeValues),
+				ReturnValuesOnConditionCheckFailure: item.Put.ReturnValuesOnConditionCheckFailure,
+			}
+		}
+		if item.Update != nil {
+			transactItem.Update = &types.Update{
+				Key:                                 transformToDdbMap(item.Update.Key),
+				TableName:                           item.Update.TableName,
+				UpdateExpression:                    item.Update.UpdateExpression,
+				ConditionExpression:                 item.Update.ConditionExpression,
+				ExpressionAttributeNames:            item.Update.ExpressionAttributeNames,
+				ExpressionAttributeValues:           transformToDdbMap(item.Update.ExpressionAttributeValues),
+				ReturnValuesOnConditionCheckFailure: item.Update.ReturnValuesOnConditionCheckFailure,
+			}
+		}
+		transactItems[i] = transactItem
+	}
+
+	input := &dynamodb.TransactWriteItemsInput{
+		TransactItems: transactItems,
+	}
+	return input, nil
+}
+
+func EncodeTransactWriteItemsOutput(output *dynamodb.TransactWriteItemsOutput) ([]byte, error) {
+	bs, err := json.Marshal(output)
+	return bs, err
+}

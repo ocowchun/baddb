@@ -1,6 +1,9 @@
 package token
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 type TokenType uint8
 
@@ -12,13 +15,15 @@ const (
 	COMMA
 	LPAREN
 	RPAREN
-	LBRACE
-	RBRACE
+	LBRACKET
+	RBRACKET
 	LT
 	GT
 	DOT
 	BETWEEN
 	AND
+	OR
+	NOT
 	FALSE
 	EQ
 	NOT_EQ
@@ -26,6 +31,12 @@ const (
 	COLON
 	SHARP
 	BEGINS_WITH
+	ATTRIBUTE_EXISTS
+	ATTRIBUTE_NOT_EXISTS
+	ATTRIBUTE_TYPE
+	CONTAINS
+	SIZE
+	IN
 )
 
 func (t TokenType) String() string {
@@ -44,10 +55,10 @@ func (t TokenType) String() string {
 		return "LPAREN"
 	case RPAREN:
 		return "RPAREN"
-	case LBRACE:
-		return "LBRACE"
-	case RBRACE:
-		return "RBRACE"
+	case LBRACKET:
+		return "LBRACKET"
+	case RBRACKET:
+		return "RBRACKET"
 	case LT:
 		return "LT"
 	case GT:
@@ -58,6 +69,8 @@ func (t TokenType) String() string {
 		return "BETWEEN"
 	case AND:
 		return "AND"
+	case OR:
+		return "OR"
 	case FALSE:
 		return "FALSE"
 	case EQ:
@@ -83,13 +96,21 @@ type Token struct {
 }
 
 var keywords = map[string]TokenType{
-	"BETWEEN":     BETWEEN,
-	"AND":         AND,
-	"begins_with": BEGINS_WITH,
+	"BETWEEN":              BETWEEN,
+	"AND":                  AND,
+	"OR":                   OR,
+	"NOT":                  NOT,
+	"BEGINS_WITH":          BEGINS_WITH,
+	"ATTRIBUTE_EXISTS":     ATTRIBUTE_EXISTS,
+	"ATTRIBUTE_NOT_EXISTS": ATTRIBUTE_NOT_EXISTS,
+	"ATTRIBUTE_TYPE":       ATTRIBUTE_TYPE,
+	"CONTAINS":             CONTAINS,
+	"SIZE":                 SIZE,
+	"IN":                   IN,
 }
 
 func LookupIdent(ident string) TokenType {
-	if tok, ok := keywords[ident]; ok {
+	if tok, ok := keywords[strings.ToUpper(ident)]; ok {
 		return tok
 	}
 	return IDENT

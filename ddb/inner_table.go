@@ -276,6 +276,7 @@ func (t *InnerTable) newGsiEntry(entry *EntryWrapper, gsi GlobalSecondaryIndexSe
 type GetRequest struct {
 	Entry          *Entry
 	ConsistentRead bool
+	TableName      string
 }
 
 type PrimaryKey struct {

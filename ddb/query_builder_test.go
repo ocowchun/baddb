@@ -3,8 +3,7 @@ package ddb
 import (
 	"bytes"
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"github.com/ocowchun/baddb/ddb/expression"
+	"github.com/ocowchun/baddb/expression"
 	"testing"
 )
 
@@ -23,8 +22,8 @@ func TestSimplePredicateExpression(t *testing.T) {
 			},
 		},
 		TableMetadata: &TableMetaData{
-			partitionKeySchema: &types.KeySchemaElement{
-				AttributeName: aws.String("year"),
+			PartitionKeySchema: &KeySchema{
+				AttributeName: "year",
 			},
 		},
 	}
@@ -131,11 +130,11 @@ func TestSimplePredicateExpression_With_SortKey(t *testing.T) {
 			KeyConditionExpression:    keyConditionExpression,
 			ExpressionAttributeValues: expressionAttributeValues,
 			TableMetadata: &TableMetaData{
-				partitionKeySchema: &types.KeySchemaElement{
-					AttributeName: aws.String("year"),
+				PartitionKeySchema: &KeySchema{
+					AttributeName: "year",
 				},
-				sortKeySchema: &types.KeySchemaElement{
-					AttributeName: aws.String("title"),
+				SortKeySchema: &KeySchema{
+					AttributeName: "title",
 				},
 			},
 		}
@@ -180,8 +179,8 @@ func TestSimplePredicateExpression_With_GSI(t *testing.T) {
 			},
 		},
 		TableMetadata: &TableMetaData{
-			partitionKeySchema: &types.KeySchemaElement{
-				AttributeName: aws.String("year"),
+			PartitionKeySchema: &KeySchema{
+				AttributeName: "year",
 			},
 			GlobalSecondaryIndexSettings: []GlobalSecondaryIndexSetting{
 				{

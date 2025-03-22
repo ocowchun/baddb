@@ -315,6 +315,20 @@ func (svr *DdbServer) Handler(w http.ResponseWriter, req *http.Request) {
 				return encoding.EncodeQueryOutput(i.(*dynamodb.QueryOutput))
 			},
 		)
+	case "TransactWriteItems":
+		genericHandler(
+			w,
+			req,
+			func(bs io.ReadCloser) (interface{}, error) {
+				return encoding.DecodeTransactWriteItemsInput(bs)
+			},
+			func(ctx context.Context, input interface{}) (interface{}, error) {
+				return svr.inner.TransactWriteItems(ctx, input.(*dynamodb.TransactWriteItemsInput))
+			},
+			func(i interface{}) ([]byte, error) {
+				return encoding.EncodeTransactWriteItemsOutput(i.(*dynamodb.TransactWriteItemsOutput))
+			},
+		)
 	default:
 		w.WriteHeader(http.StatusBadRequest)
 		return

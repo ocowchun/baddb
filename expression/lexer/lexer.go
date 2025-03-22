@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/ocowchun/baddb/ddb/expression/token"
+	"github.com/ocowchun/baddb/expression/token"
 	"io"
 	"unicode"
 )
@@ -81,6 +81,10 @@ func (l *Lexer) NextToken() token.Token {
 		tok = newToken(token.LPAREN, "(")
 	case ')':
 		tok = newToken(token.RPAREN, ")")
+	case '[':
+		tok = newToken(token.LBRACKET, "[")
+	case ']':
+		tok = newToken(token.RBRACKET, "]")
 	case ',':
 		tok = newToken(token.COMMA, ",")
 	case '<':

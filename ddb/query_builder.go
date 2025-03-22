@@ -3,7 +3,7 @@ package ddb
 import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"github.com/ocowchun/baddb/ddb/expression/ast"
+	"github.com/ocowchun/baddb/expression/ast"
 	"log"
 )
 
@@ -57,6 +57,7 @@ type Query struct {
 	ExclusiveStartKey *[]byte
 	Limit             int
 	ScanIndexForward  bool
+	TableName         string
 	IndexName         *string
 }
 
@@ -113,15 +114,15 @@ func (b *QueryBuilder) BuildQuery() (*Query, error) {
 
 	if len(b.ExclusiveStartKey) > 0 {
 		bs := make([]byte, 0)
-		tablePartitionKey := *b.TableMetadata.partitionKeySchema.AttributeName
+		tablePartitionKey := b.TableMetadata.PartitionKeySchema.AttributeName
 		if val, ok := b.ExclusiveStartKey[tablePartitionKey]; ok {
 			bs = TransformDdbAttributeValue(val).Bytes()
 		} else {
 			return nil, fmt.Errorf("partition key %s not found in ExclusiveStartKey", tablePartitionKey)
 		}
 
-		if b.TableMetadata.sortKeySchema != nil {
-			tableSortKey := *b.TableMetadata.sortKeySchema.AttributeName
+		if b.TableMetadata.SortKeySchema != nil {
+			tableSortKey := b.TableMetadata.SortKeySchema.AttributeName
 			if val, ok := b.ExclusiveStartKey[tableSortKey]; ok {
 				bs = append(bs, []byte("|")...)
 				bs = append(bs, TransformDdbAttributeValue(val).Bytes()...)
@@ -191,7 +192,7 @@ func (b *QueryBuilder) expectedPartitionKey() *string {
 		}
 		log.Fatalf("index %s not found", *b.IndexName)
 	}
-	return b.TableMetadata.partitionKeySchema.AttributeName
+	return &b.TableMetadata.PartitionKeySchema.AttributeName
 }
 
 func (b *QueryBuilder) expectedSortKey() *string {
@@ -204,8 +205,8 @@ func (b *QueryBuilder) expectedSortKey() *string {
 		log.Fatalf("index %s not found", *b.IndexName)
 	}
 
-	if b.TableMetadata.sortKeySchema != nil {
-		return b.TableMetadata.sortKeySchema.AttributeName
+	if b.TableMetadata.SortKeySchema != nil {
+		return &b.TableMetadata.SortKeySchema.AttributeName
 	}
 	return nil
 }
