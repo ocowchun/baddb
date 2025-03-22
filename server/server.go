@@ -27,6 +27,8 @@ func handleDdbError(w http.ResponseWriter, outputErr error) {
 	var resourceNotFoundException *types.ResourceNotFoundException
 	var validationException *ddb.ValidationException
 	var provisionedThroughputExceededException *types.ProvisionedThroughputExceededException
+	var conditionalCheckFailedException *ddb.ConditionalCheckFailedException
+	log.Println("handle err", outputErr)
 	switch {
 
 	case errors.As(outputErr, &resourceInUseException):
@@ -94,6 +96,26 @@ func handleDdbError(w http.ResponseWriter, outputErr error) {
 		errResponse := ErrorResponse{
 			Type:    "com.amazon.coral.validate#ValidationException",
 			Message: validationException.Error(),
+		}
+
+		bs, err := json.Marshal(errResponse)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, err = w.Write(bs)
+		if err != nil {
+			log.Printf("Error writing response: %v", err)
+			return
+		}
+
+		return
+	case errors.As(outputErr, &conditionalCheckFailedException):
+		w.WriteHeader(http.StatusBadRequest)
+
+		errResponse := ErrorResponse{
+			Type:    "ConditionalCheckFailedException",
+			Message: conditionalCheckFailedException.Message,
 		}
 
 		bs, err := json.Marshal(errResponse)

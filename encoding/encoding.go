@@ -359,7 +359,7 @@ type putItemInput struct {
 	ConditionalOperator                 types.ConditionalOperator
 	Expected                            map[string]types.ExpectedAttributeValue
 	ExpressionAttributeNames            map[string]string
-	ExpressionAttributeValues           map[string]types.AttributeValue
+	ExpressionAttributeValues           map[string]ddb.AttributeValue
 	ReturnConsumedCapacity              types.ReturnConsumedCapacity
 	ReturnItemCollectionMetrics         types.ReturnItemCollectionMetrics
 	ReturnValues                        types.ReturnValue
@@ -389,7 +389,7 @@ func DecodePutItemInput(reader io.ReadCloser) (*dynamodb.PutItemInput, error) {
 		ConditionalOperator:                 input2.ConditionalOperator,
 		Expected:                            input2.Expected,
 		ExpressionAttributeNames:            input2.ExpressionAttributeNames,
-		ExpressionAttributeValues:           input2.ExpressionAttributeValues,
+		ExpressionAttributeValues:           transformToDdbMap(input2.ExpressionAttributeValues),
 		ReturnConsumedCapacity:              input2.ReturnConsumedCapacity,
 		ReturnItemCollectionMetrics:         input2.ReturnItemCollectionMetrics,
 		ReturnValues:                        input2.ReturnValues,

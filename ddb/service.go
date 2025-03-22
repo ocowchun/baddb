@@ -307,15 +307,33 @@ func (svc *Service) PutItem(ctx context.Context, input *dynamodb.PutItemInput) (
 	if _, ok := svc.tableMetadatas[tableName]; ok {
 		entry := NewEntryFromItem(input.Item)
 
+		var condition *Condition
+		var err error
+		if input.ConditionExpression != nil {
+			condition, err = BuildCondition(
+				*input.ConditionExpression,
+				input.ExpressionAttributeNames,
+				NewEntryFromItem(input.ExpressionAttributeValues).Body,
+			)
+			if err != nil {
+				return nil, &ValidationException{
+					Message: err.Error(),
+				}
+			}
+		}
+
 		req := &PutRequest{
 			Entry:     entry,
 			TableName: tableName,
+			Condition: condition,
 		}
-		err := svc.storage.Put(req)
+		err = svc.storage.Put(req)
+		if err != nil {
+			return nil, err
+		}
 		//TODO: add PutItemOutput
-		return nil, err
+		return nil, nil
 	} else {
-		fmt.Println("table not found")
 		msg := "Cannot do operations on a non-existent table"
 		err := &types.ResourceNotFoundException{
 			Message: &msg,

@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"log"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -665,11 +666,115 @@ func TestTransactWriteItems(t *testing.T) {
 	}
 }
 
+func TestPutWithCondition(t *testing.T) {
+	shutdown := startServer()
+	defer shutdown()
+	ddb := newDdbClient()
+	_, err := createTable(ddb)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Insert an item
+	_, err = putItem(ddb)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Try to update item with a invalid condition
+	putItemInput := &dynamodb.PutItemInput{
+		Item: map[string]types.AttributeValue{
+			"year":       &types.AttributeValueMemberN{Value: "2025"},
+			"title":      &types.AttributeValueMemberS{Value: "Hello World"},
+			"regionCode": &types.AttributeValueMemberS{Value: "1"},
+		},
+		TableName:           aws.String("movie"),
+		ConditionExpression: aws.String("attribute_not_exists(#year)"),
+	}
+
+	_, err = ddb.PutItem(context.Background(), putItemInput)
+	if err == nil {
+		t.Fatalf("Expected Validation error, got nil")
+	} else {
+		if !strings.Contains(err.Error(), "An expression attribute name used in the document path is not defined; attribute name: #year") {
+			t.Fatalf("error message is unexpected, got %v", err)
+		}
+	}
+
+	// Try to update item with a condition that fails
+	putItemInput = &dynamodb.PutItemInput{
+		Item: map[string]types.AttributeValue{
+			"year":       &types.AttributeValueMemberN{Value: "2025"},
+			"title":      &types.AttributeValueMemberS{Value: "Hello World"},
+			"regionCode": &types.AttributeValueMemberS{Value: "1"},
+		},
+		TableName:           aws.String("movie"),
+		ConditionExpression: aws.String("attribute_not_exists(year)"),
+	}
+
+	_, err = ddb.PutItem(context.Background(), putItemInput)
+	if err == nil {
+		t.Fatalf("Expected ConditionalCheckFailedException, got nil")
+	} else {
+		var conditionalCheckFailedException *types.ConditionalCheckFailedException
+		if !errors.As(err, &conditionalCheckFailedException) {
+			t.Fatalf("Expected ConditionalCheckFailedException, got %v", err)
+		}
+	}
+
+	// Try to updated the item with a condition that passes
+	putItemInput = &dynamodb.PutItemInput{
+		Item: map[string]types.AttributeValue{
+			"year":       &types.AttributeValueMemberN{Value: "2025"},
+			"title":      &types.AttributeValueMemberS{Value: "Hello World"},
+			"message":    &types.AttributeValueMemberS{Value: "Jobs done"},
+			"regionCode": &types.AttributeValueMemberS{Value: "1"},
+		},
+		TableName:           aws.String("movie"),
+		ConditionExpression: aws.String("attribute_not_exists(#regionCode) AND contains(#message, :message)"),
+		ExpressionAttributeNames: map[string]string{
+			"#regionCode": "regionCode",
+			"#message":    "message",
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":message": &types.AttributeValueMemberS{Value: "magic"},
+		},
+	}
+
+	_, err = ddb.PutItem(context.Background(), putItemInput)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// confirm the item is updated
+	getItemInput := &dynamodb.GetItemInput{
+		Key: map[string]types.AttributeValue{
+			"year":  &types.AttributeValueMemberN{Value: "2025"},
+			"title": &types.AttributeValueMemberS{Value: "Hello World"},
+		},
+		TableName:      aws.String("movie"),
+		ConsistentRead: aws.Bool(true),
+	}
+	getItemOutput, err := ddb.GetItem(context.Background(), getItemInput)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if val, ok := getItemOutput.Item["message"]; !ok {
+		t.Fatalf("Expected message to be present, got nil")
+	} else {
+		if val.(*types.AttributeValueMemberS).Value != "Jobs done" {
+			t.Fatalf("Expected message to be Jobs done, got %s", val.(*types.AttributeValueMemberS).Value)
+		}
+	}
+
+}
+
 func putItem(client *dynamodb.Client) (*dynamodb.PutItemOutput, error) {
 	putItemInput := &dynamodb.PutItemInput{
 		Item: map[string]types.AttributeValue{
-			"year":  &types.AttributeValueMemberN{Value: "2025"},
-			"title": &types.AttributeValueMemberS{Value: "Hello World"},
+			"year":    &types.AttributeValueMemberN{Value: "2025"},
+			"title":   &types.AttributeValueMemberS{Value: "Hello World"},
+			"message": &types.AttributeValueMemberS{Value: "your magic is mine"},
 		},
 		TableName: aws.String("movie"),
 	}

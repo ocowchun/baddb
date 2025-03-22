@@ -5,11 +5,92 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	_ "github.com/mattn/go-sqlite3"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+type PrimaryKey struct {
+	PartitionKey []byte
+	SortKey      []byte
+}
+
+func (k *PrimaryKey) Bytes() []byte {
+	bs := make([]byte, 0)
+	bs = append(bs, k.PartitionKey...)
+
+	//	// TODO: need a better way to generate primary key, current approach will failed for below case
+	//	// pk: ab, sk: |cd and pk: ab|, sk: cd
+	bs = append(bs, []byte("|")...)
+	bs = append(bs, k.SortKey...)
+
+	return bs
+}
+
+type QueryResponse struct {
+	Entries      []*Entry
+	ScannedCount int32
+}
+
+type EntryWithKey struct {
+	Key   []byte
+	Entry *Entry
+}
+
+type Entry struct {
+
+	//PartitionKey *AttributeValue
+	//SortKey      *AttributeValue
+	Body map[string]AttributeValue
+}
+
+type EntryWrapper struct {
+	Entry     *Entry
+	IsDeleted bool
+	CreatedAt time.Time
+}
+
+//type
+
+type Tuple struct {
+	Entries []EntryWrapper
+}
+
+// return prevEntry, found
+func (t *Tuple) prevEntry() *Entry {
+	if len(t.Entries) < 2 {
+		return nil
+	} else {
+		prevEntry := t.Entries[0]
+		if prevEntry.IsDeleted {
+			return nil
+		}
+		return prevEntry.Entry
+	}
+}
+
+// return lastEntry, found
+func (t *Tuple) currentEntry() *Entry {
+	if len(t.Entries) == 0 {
+		return nil
+	} else {
+		lastEntry := t.Entries[len(t.Entries)-1]
+		if lastEntry.IsDeleted {
+			return nil
+		}
+		return lastEntry.Entry
+	}
+}
+
+// addEntry only keep last 2 Entries
+func (t *Tuple) addEntry(entryWrapper *EntryWrapper) {
+
+	t.Entries = append(t.Entries, *entryWrapper)
+	if len(t.Entries) > 2 {
+		t.Entries = t.Entries[1:]
+	}
+}
 
 type InnerStorage struct {
 	db             *sql.DB
@@ -44,7 +125,6 @@ func (s *InnerStorage) CreateTable(meta *TableMetaData) error {
 	delete from ` + tableName + `;
 	create index idx_` + tableName + `_partiton_key_sort_key on ` + tableName + `(partition_key, sort_key);
 	`
-	log.Println(sqlStmt)
 
 	globalSecondarySettings := meta.GlobalSecondaryIndexSettings
 	for _, gsi := range globalSecondarySettings {
@@ -57,9 +137,7 @@ func (s *InnerStorage) CreateTable(meta *TableMetaData) error {
 	}
 
 	_, err := s.db.Exec(sqlStmt)
-	log.Println("after exec")
 	if err != nil {
-		log.Println("something went wrong", err.Error())
 		return err
 	}
 	innerTableMetadata := &InnerTableMetadata{
@@ -133,6 +211,7 @@ func (s *InnerStorage) BeginTxn(readOnly bool) (*Txn, error) {
 type PutRequest struct {
 	Entry     *Entry
 	TableName string
+	Condition *Condition
 }
 
 func (s *InnerStorage) Put(req *PutRequest) error {
@@ -149,6 +228,12 @@ func (s *InnerStorage) Put(req *PutRequest) error {
 	}
 
 	return txn.Commit()
+}
+
+type DeleteRequest struct {
+	Entry     *Entry
+	TableName string
+	Condition *Condition
 }
 
 func (s *InnerStorage) Delete(req *DeleteRequest) error {
@@ -178,7 +263,7 @@ func (s *InnerStorage) DeleteWithTransaction(req *DeleteRequest, txn *Txn) error
 		IsDeleted: true,
 		CreatedAt: time.Now(),
 	}
-	return s.put(entryWrapper, tableMetadata, txn.tx)
+	return s.put(entryWrapper, tableMetadata, nil, txn.tx)
 }
 
 func (s *InnerStorage) PutWithTransaction(req *PutRequest, txn *Txn) error {
@@ -193,16 +278,23 @@ func (s *InnerStorage) PutWithTransaction(req *PutRequest, txn *Txn) error {
 		CreatedAt: time.Now(),
 	}
 
-	err := s.put(entryWrapper, tableMetadata, txn.tx)
+	err := s.put(entryWrapper, tableMetadata, req.Condition, txn.tx)
 	if err != nil {
 		return err
-
 	}
 
 	return nil
 }
 
-func (s *InnerStorage) put(entry *EntryWrapper, table *InnerTableMetadata, txn *sql.Tx) error {
+type ConditionalCheckFailedException struct {
+	Message string
+}
+
+func (e *ConditionalCheckFailedException) Error() string {
+	return e.Message
+}
+
+func (s *InnerStorage) put(entry *EntryWrapper, table *InnerTableMetadata, condition *Condition, txn *sql.Tx) error {
 	primaryKey, err := s.buildTablePrimaryKey(entry.Entry, table)
 	if err != nil {
 		return err
@@ -214,6 +306,17 @@ func (s *InnerStorage) put(entry *EntryWrapper, table *InnerTableMetadata, txn *
 	}
 
 	if tuple == nil {
+		if condition != nil {
+			matched, err := condition.Check(&Entry{Body: make(map[string]AttributeValue)})
+
+			// improve error handling
+			if err != nil || !matched {
+				return err
+			} else if !matched {
+				return &ConditionalCheckFailedException{"The conditional request failed"}
+			}
+		}
+
 		stmt, err := txn.Prepare("insert into " + table.Name + "(primary_key, body, partition_key, sort_key) values(?, ?, ?, ?)")
 
 		tuple = &Tuple{
@@ -236,6 +339,20 @@ func (s *InnerStorage) put(entry *EntryWrapper, table *InnerTableMetadata, txn *
 			return err
 		}
 	} else {
+		if condition != nil {
+			currentEntry := tuple.currentEntry()
+			if currentEntry == nil {
+				currentEntry = &Entry{Body: make(map[string]AttributeValue)}
+			}
+			matched, err := condition.Check(currentEntry)
+			// improve error handling
+			if err != nil {
+				return err
+			} else if !matched {
+				return &ConditionalCheckFailedException{"The conditional request failed"}
+			}
+		}
+
 		stmt, err := txn.Prepare("update " + table.Name + " set body = ? where primary_key = ?")
 
 		tuple.addEntry(entry)
@@ -409,6 +526,12 @@ func (s *InnerStorage) newGsiEntry(entry *EntryWrapper, gsi GlobalSecondaryIndex
 	return &EntryWrapper{Entry: gsiEntry, IsDeleted: false, CreatedAt: entry.CreatedAt}
 }
 
+type GetRequest struct {
+	Entry          *Entry
+	ConsistentRead bool
+	TableName      string
+}
+
 func (s *InnerStorage) Get(req *GetRequest) (*Entry, error) {
 	txn, err := s.BeginTxn(true)
 	if err != nil {
@@ -467,7 +590,6 @@ func (s *InnerStorage) Query(req *Query) (*QueryResponse, error) {
 			if *gsi.IndexName == *req.IndexName {
 				// TODO: refactor it
 				tableName = "gsi_" + tableMetadata.Name + "_" + *gsi.IndexName
-				log.Println("gsi table -> ", tableName)
 				break
 			}
 		}

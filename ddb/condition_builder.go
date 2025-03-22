@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/ocowchun/baddb/expression"
 	"github.com/ocowchun/baddb/expression/ast"
-	"log"
 	"strconv"
 	"strings"
 )
@@ -94,7 +93,6 @@ func (b *ConditionBuilder) buildOperand(operand ast.Operand) (Operand, error) {
 			key := ":" + operand.Identifier.TokenLiteral()
 			val, ok := b.expressionAttributeValues[key]
 			if !ok {
-				log.Println("yaa")
 				msg := fmt.Sprintf("An expression attribute name used in the document path is not defined; attribute name: %s", key)
 				return nil, fmt.Errorf(msg)
 			}
@@ -124,11 +122,10 @@ func (b *ConditionBuilder) buildPath(operand ast.Operand) (PathOperand, error) {
 	switch operand := operand.(type) {
 	case *ast.AttributeNameOperand:
 		if operand.HasSharp {
-			key := operand.Identifier.TokenLiteral()
+			key := "#" + operand.Identifier.TokenLiteral()
 			name, ok := b.expressionAttributeNames[key]
 			if !ok {
-				log.Println("yoooo")
-				msg := fmt.Sprintf("An expression attribute name used in the document path is not defined; attribute name: #%s", key)
+				msg := fmt.Sprintf("An expression attribute name used in the document path is not defined; attribute name: %s", key)
 				return nil, fmt.Errorf(msg)
 			}
 			return &AttributeNameOperand{

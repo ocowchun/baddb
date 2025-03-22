@@ -48,9 +48,3 @@ type GlobalSecondaryIndexSetting struct {
 	NonKeyAttributes []string
 	ProjectionType   ProjectionType
 }
-
-type DeleteRequest struct {
-	Entry     *Entry
-	TableName string
-	//key []byte
-}
