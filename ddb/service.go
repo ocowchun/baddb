@@ -591,7 +591,9 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 	for _, writeItem := range input.TransactItems {
 		if writeItem.Put != nil {
 			// TODO: handle condition
-			tableName := *writeItem.Put.TableName
+
+			put := writeItem.Put
+			tableName := *put.TableName
 			if _, ok := svc.tableMetadatas[tableName]; !ok {
 				msg := "Cannot do operations on a non-existent table"
 				err = &types.ResourceNotFoundException{
@@ -600,10 +602,25 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				return nil, err
 			}
 
-			entry := NewEntryFromItem(writeItem.Put.Item)
+			var condition *Condition
+			if put.ConditionExpression != nil {
+				condition, err = BuildCondition(
+					*put.ConditionExpression,
+					put.ExpressionAttributeNames,
+					NewEntryFromItem(put.ExpressionAttributeValues).Body,
+				)
+				if err != nil {
+					return nil, &ValidationException{
+						Message: err.Error(),
+					}
+				}
+			}
+
+			entry := NewEntryFromItem(put.Item)
 			req := &PutRequest{
 				Entry:     entry,
 				TableName: tableName,
+				Condition: condition,
 			}
 			err = svc.storage.PutWithTransaction(req, txn)
 			if err != nil {
@@ -611,7 +628,8 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 			}
 		}
 		if writeItem.Delete != nil {
-			tableName := *writeItem.Delete.TableName
+			deleteReq := writeItem.Delete
+			tableName := *deleteReq.TableName
 			if _, ok := svc.tableMetadatas[tableName]; !ok {
 				msg := "Cannot do operations on a non-existent table"
 				err = &types.ResourceNotFoundException{
@@ -619,10 +637,26 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				}
 				return nil, err
 			}
-			entry := NewEntryFromItem(writeItem.Delete.Key)
+
+			var condition *Condition
+			if deleteReq.ConditionExpression != nil {
+				condition, err = BuildCondition(
+					*deleteReq.ConditionExpression,
+					deleteReq.ExpressionAttributeNames,
+					NewEntryFromItem(deleteReq.ExpressionAttributeValues).Body,
+				)
+				if err != nil {
+					return nil, &ValidationException{
+						Message: err.Error(),
+					}
+				}
+			}
+
+			entry := NewEntryFromItem(deleteReq.Key)
 			req := &DeleteRequest{
 				Entry:     entry,
 				TableName: tableName,
+				Condition: condition,
 			}
 			err = svc.storage.DeleteWithTransaction(req, txn)
 			if err != nil {
