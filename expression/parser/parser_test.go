@@ -45,6 +45,7 @@ func TestParseOperand(t *testing.T) {
 		{"attributeName[0]", "attributeName[0]"},
 		{":attributeName.subAttribute", ":attributeName.subAttribute"},
 		{"ProductReviews.FiveStar[0]", "ProductReviews.FiveStar[0]"},
+		{"size(attributeName)", "size(attributeName)"},
 	}
 
 	for _, tt := range tests {
@@ -72,7 +73,6 @@ func TestParseFunctionConditionExpression(t *testing.T) {
 		{"attribute_type(attributeName, S)", "attribute_type(attributeName, S)"},
 		{"begins_with(attributeName, prefix)", "begins_with(attributeName, prefix)"},
 		{"contains(attributeName, operand)", "contains(attributeName, operand)"},
-		{"size(attributeName)", "size(attributeName)"},
 	}
 
 	for _, tt := range tests {
@@ -107,6 +107,7 @@ func TestParseConditionExpression(t *testing.T) {
 		{"(attributeName = :attributeValue OR attributeName2 = :attributeValue2) AND attributeName3 = :attributeValue3", "((attributeName = :attributeValue OR attributeName2 = :attributeValue2) AND attributeName3 = :attributeValue3)"},
 		{"a1 = :v1 AND a2 = :v2 OR a3 = :v3", "((a1 = :v1 AND a2 = :v2) OR a3 = :v3)"},
 		{"a1 = :v1 AND NOT a2 = :v2 OR a3 = :v3", "((a1 = :v1 AND NOT a2 = :v2) OR a3 = :v3)"},
+		{"size(Brand) <= :v_sub AND begins_with(Pictures.FrontView, :v_sub)", "(size(Brand) <= :v_sub AND begins_with(Pictures.FrontView, :v_sub))"},
 	}
 
 	for _, tt := range tests {

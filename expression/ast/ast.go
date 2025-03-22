@@ -607,29 +607,6 @@ func (fc *ContainsFunctionExpression) String() string {
 	return out.String()
 }
 
-type SizeFunctionExpression struct {
-	Path Operand
-}
-
-func (fs *SizeFunctionExpression) functionExpressionNode() {}
-func (fs *SizeFunctionExpression) String() string {
-	var out bytes.Buffer
-	out.WriteString("size(")
-	out.WriteString(fs.Path.String())
-	out.WriteString(")")
-	return out.String()
-}
-
-//condition-expression ::=
-//      operand comparator operand
-//    | operand BETWEEN operand AND operand
-//    | operand IN ( operand (',' operand (, ...) ))
-//    | function
-//    | condition AND condition
-//    | condition OR condition
-//    | NOT condition
-//    | ( condition )
-
 type Operand interface {
 	operandNode()
 	String() string
@@ -676,6 +653,19 @@ func (dop *DotOperand) String() string {
 	return fmt.Sprintf("%s.%s", dop.Left.String(), dop.Right.String())
 }
 
+type SizeOperand struct {
+	Path Operand
+}
+
+func (fop *SizeOperand) operandNode() {}
+func (fop *SizeOperand) String() string {
+	var out bytes.Buffer
+	out.WriteString("size(")
+	out.WriteString(fop.Path.String())
+	out.WriteString(")")
+	return out.String()
+}
+
 type ConditionExpression interface {
 	conditionExpressionNode()
 	String() string
@@ -699,9 +689,9 @@ func (cc *ComparatorConditionExpression) String() string {
 }
 
 type BetweenConditionExpression struct {
-	Operand Operand
-	Begin   Operand
-	End     Operand
+	Operand    Operand
+	LowerBound Operand
+	UpperBound Operand
 }
 
 func (bc *BetweenConditionExpression) conditionExpressionNode() {}
@@ -709,9 +699,9 @@ func (bc *BetweenConditionExpression) String() string {
 	var out bytes.Buffer
 	out.WriteString(bc.Operand.String())
 	out.WriteString(" BETWEEN ")
-	out.WriteString(bc.Begin.String())
+	out.WriteString(bc.LowerBound.String())
 	out.WriteString(" AND ")
-	out.WriteString(bc.End.String())
+	out.WriteString(bc.UpperBound.String())
 	return out.String()
 }
 

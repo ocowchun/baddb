@@ -240,29 +240,6 @@ type (
 	infixParseFn  func(ast.Expression) (ast.Expression, error)
 )
 
-// DynamoDB evaluates conditions from left to right using the following precedence rules:
-// = <> < <= > >=
-// IN
-// BETWEEN
-// attribute_exists attribute_not_exists begins_with contains
-// Parentheses
-// NOT
-// AND
-// OR
-// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.OperatorsAndFunctions.html#Expressions.OperatorsAndFunctions.Precedence
-
-const (
-	PRECEDENCE_LOWEST uint8 = iota
-	PRECEDENCE_OR
-	PRECEDENCE_AND
-	PRECEDENCE_NOT
-	PRECEDENCE_PARENTHESIS
-	PRECEDENCE_BETWEEN
-	PRECEDENCE_FUNCTION
-	PRECEDENCE_IN
-	PRECEDENCE_COMPARATOR
-)
-
 func (p *Parser) parseIdentifier() (ast.Expression, error) {
 	return &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}, nil
 }
@@ -295,6 +272,29 @@ func (p *Parser) parseAttributeValueIdentifier() (ast.Expression, error) {
 	return avi, nil
 }
 
+// DynamoDB evaluates conditions from left to right using the following precedence rules:
+// = <> < <= > >=
+// IN
+// BETWEEN
+// attribute_exists attribute_not_exists begins_with contains
+// Parentheses
+// NOT
+// AND
+// OR
+// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.OperatorsAndFunctions.html#Expressions.OperatorsAndFunctions.Precedence
+
+const (
+	PRECEDENCE_LOWEST uint8 = iota
+	PRECEDENCE_OR
+	PRECEDENCE_AND
+	PRECEDENCE_NOT
+	PRECEDENCE_PARENTHESIS
+	PRECEDENCE_BETWEEN
+	PRECEDENCE_FUNCTION
+	PRECEDENCE_IN
+	PRECEDENCE_COMPARATOR
+)
+
 var precedences = map[token.TokenType]uint8{
 	token.IN:                   PRECEDENCE_IN,
 	token.BETWEEN:              PRECEDENCE_BETWEEN,
@@ -302,7 +302,6 @@ var precedences = map[token.TokenType]uint8{
 	token.ATTRIBUTE_NOT_EXISTS: PRECEDENCE_FUNCTION,
 	token.ATTRIBUTE_TYPE:       PRECEDENCE_FUNCTION,
 	token.CONTAINS:             PRECEDENCE_FUNCTION,
-	token.SIZE:                 PRECEDENCE_FUNCTION,
 	token.LPAREN:               PRECEDENCE_PARENTHESIS,
 	token.NOT:                  PRECEDENCE_NOT,
 	token.AND:                  PRECEDENCE_AND,
@@ -358,7 +357,7 @@ func (p *Parser) parseStringLiteral() (ast.Expression, error) {
 	return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}, nil
 }
 
-func (p *Parser) isFunction() bool {
+func (p *Parser) isFunctionCondition() bool {
 	switch p.curToken.Type {
 	case token.ATTRIBUTE_EXISTS:
 		return true
@@ -370,13 +369,12 @@ func (p *Parser) isFunction() bool {
 		return true
 	case token.CONTAINS:
 		return true
-	case token.SIZE:
-		return true
 	default:
 		return false
 	}
 }
 
+// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.OperatorsAndFunctions.html
 func (p *Parser) ParseConditionExpression() (ast.ConditionExpression, error) {
 	return p.parseConditionExpression(PRECEDENCE_LOWEST)
 }
@@ -393,7 +391,7 @@ func (p *Parser) parseConditionExpression(precedence uint8) (ast.ConditionExpres
 		if !p.expectPeek(token.RPAREN) {
 			return nil, fmt.Errorf("failed to parse RPAREN")
 		}
-	} else if p.isFunction() {
+	} else if p.isFunctionCondition() {
 		functionExpression, err := p.parseFunctionConditionExpression()
 		if err != nil {
 			return nil, err
@@ -441,9 +439,9 @@ func (p *Parser) parseConditionExpression(precedence uint8) (ast.ConditionExpres
 			}
 
 			left = &ast.BetweenConditionExpression{
-				Operand: operand,
-				Begin:   begin,
-				End:     end,
+				Operand:    operand,
+				LowerBound: begin,
+				UpperBound: end,
 			}
 		} else if p.peekTokenIs(token.IN) {
 			// | operand IN ( operand (',' operand (, ...) ))
@@ -662,24 +660,6 @@ func (p *Parser) parseFunctionConditionExpression() (ast.FunctionExpression, err
 			Path:    path,
 			Operand: operand,
 		}, nil
-	case token.SIZE:
-		if !p.expectPeek(token.LPAREN) {
-			return nil, fmt.Errorf("failed to parse LPAREN")
-		}
-		p.nextToken()
-
-		path, err := p.parseOperand()
-		if err != nil {
-			return nil, err
-		}
-
-		if !p.expectPeek(token.RPAREN) {
-			return nil, fmt.Errorf("failed to parse RPAREN")
-		}
-
-		return &ast.SizeFunctionExpression{
-			Path: path,
-		}, nil
 	default:
 		return nil, fmt.Errorf("failed to parse function condition expression")
 	}
@@ -728,6 +708,25 @@ func (p *Parser) parseOperand() (ast.Operand, error) {
 			Identifier: identifier,
 			HasColon:   true,
 		}
+	} else if p.curTokenIs(token.SIZE) {
+		if !p.expectPeek(token.LPAREN) {
+			return nil, fmt.Errorf("failed to parse LPAREN")
+		}
+		p.nextToken()
+
+		path, err := p.parseOperand()
+		if err != nil {
+			return nil, err
+		}
+
+		if !p.expectPeek(token.RPAREN) {
+			return nil, fmt.Errorf("failed to parse RPAREN")
+		}
+
+		return &ast.SizeOperand{
+			Path: path,
+		}, nil
+
 	} else {
 		return nil, fmt.Errorf("unexpected token %v", p.curToken)
 	}

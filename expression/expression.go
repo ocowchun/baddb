@@ -14,3 +14,9 @@ func ParseKeyConditionExpression(content string) (*ast.KeyConditionExpression, e
 
 	return p.ParseKeyConditionExpression()
 }
+func ParseConditionExpression(content string) (ast.ConditionExpression, error) {
+	l := lexer.New(strings.NewReader(content))
+	p := parser.New(l)
+
+	return p.ParseConditionExpression()
+}

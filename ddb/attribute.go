@@ -24,6 +24,30 @@ type AttributeValue struct {
 	SS   *[]string                  `json:",omitempty"`
 }
 
+func (a AttributeValue) Type() string {
+	if a.B != nil {
+		return "B"
+	} else if a.Bool != nil {
+		return "BOOL"
+	} else if a.L != nil {
+		return "L"
+	} else if a.M != nil {
+		return "M"
+	} else if a.N != nil {
+		return "N"
+	} else if a.NS != nil {
+		return "NS"
+	} else if a.NULL != nil {
+		return "NULL"
+	} else if a.S != nil {
+		return "S"
+	} else if a.SS != nil {
+		return "SS"
+	}
+
+	panic("unreachable")
+}
+
 func (a AttributeValue) Bytes() []byte {
 	if a.B != nil {
 		return *a.B
