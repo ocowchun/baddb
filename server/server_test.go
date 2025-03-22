@@ -766,7 +766,74 @@ func TestPutWithCondition(t *testing.T) {
 			t.Fatalf("Expected message to be Jobs done, got %s", val.(*types.AttributeValueMemberS).Value)
 		}
 	}
+}
 
+func TestDeleteWithCondition(t *testing.T) {
+	shutdown := startServer()
+	defer shutdown()
+	ddb := newDdbClient()
+	_, err := createTable(ddb)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Insert an item
+	_, err = putItem(ddb)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Try to delete item with a condition that fails
+	deleteItemInput := &dynamodb.DeleteItemInput{
+		Key: map[string]types.AttributeValue{
+			"year":  &types.AttributeValueMemberN{Value: "2025"},
+			"title": &types.AttributeValueMemberS{Value: "Hello World"},
+		},
+		TableName:           aws.String("movie"),
+		ConditionExpression: aws.String("attribute_not_exists(year)"),
+	}
+
+	_, err = ddb.DeleteItem(context.Background(), deleteItemInput)
+	if err == nil {
+		t.Fatalf("Expected ConditionalCheckFailedException, got nil")
+	} else {
+		var conditionalCheckFailedException *types.ConditionalCheckFailedException
+		if !errors.As(err, &conditionalCheckFailedException) {
+			t.Fatalf("Expected ConditionalCheckFailedException, got %v", err)
+		}
+	}
+
+	// Try to delete item with a condition that passes
+	deleteItemInput = &dynamodb.DeleteItemInput{
+		Key: map[string]types.AttributeValue{
+			"year":  &types.AttributeValueMemberN{Value: "2025"},
+			"title": &types.AttributeValueMemberS{Value: "Hello World"},
+		},
+		TableName:           aws.String("movie"),
+		ConditionExpression: aws.String("attribute_exists(year)"),
+	}
+
+	_, err = ddb.DeleteItem(context.Background(), deleteItemInput)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Confirm the item is deleted
+	getItemInput := &dynamodb.GetItemInput{
+		Key: map[string]types.AttributeValue{
+			"year":  &types.AttributeValueMemberN{Value: "2025"},
+			"title": &types.AttributeValueMemberS{Value: "Hello World"},
+		},
+		TableName:      aws.String("movie"),
+		ConsistentRead: aws.Bool(true),
+	}
+	getItemOutput, err := ddb.GetItem(context.Background(), getItemInput)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if len(getItemOutput.Item) != 0 {
+		t.Fatalf("Expected no item, got %v", len(getItemOutput.Item))
+	}
 }
 
 func putItem(client *dynamodb.Client) (*dynamodb.PutItemOutput, error) {

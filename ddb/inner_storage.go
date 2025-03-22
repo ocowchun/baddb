@@ -263,7 +263,7 @@ func (s *InnerStorage) DeleteWithTransaction(req *DeleteRequest, txn *Txn) error
 		IsDeleted: true,
 		CreatedAt: time.Now(),
 	}
-	return s.put(entryWrapper, tableMetadata, nil, txn.tx)
+	return s.put(entryWrapper, tableMetadata, req.Condition, txn.tx)
 }
 
 func (s *InnerStorage) PutWithTransaction(req *PutRequest, txn *Txn) error {

@@ -348,17 +348,35 @@ func (svc *Service) DeleteItem(ctx context.Context, input *dynamodb.DeleteItemIn
 
 	tableName := *input.TableName
 	if _, ok := svc.tableMetadatas[tableName]; ok {
-		entry := NewEntryFromItem(input.Key)
+		var condition *Condition
+		var err error
+		if input.ConditionExpression != nil {
+			condition, err = BuildCondition(
+				*input.ConditionExpression,
+				input.ExpressionAttributeNames,
+				NewEntryFromItem(input.ExpressionAttributeValues).Body,
+			)
+			if err != nil {
+				return nil, &ValidationException{
+					Message: err.Error(),
+				}
+			}
+		}
 
+		entry := NewEntryFromItem(input.Key)
 		req := &DeleteRequest{
 			Entry:     entry,
 			TableName: tableName,
+			Condition: condition,
 		}
 
-		err := svc.storage.Delete(req)
+		err = svc.storage.Delete(req)
+		if err != nil {
+			return nil, err
+		}
 		output := &dynamodb.DeleteItemOutput{}
 
-		return output, err
+		return output, nil
 	} else {
 		fmt.Println("table not found")
 		msg := "Cannot do operations on a non-existent table"
