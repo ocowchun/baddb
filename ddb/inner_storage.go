@@ -1,6 +1,7 @@
 package ddb
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -26,6 +27,16 @@ func (k *PrimaryKey) Bytes() []byte {
 	bs = append(bs, k.SortKey...)
 
 	return bs
+}
+
+func (k *PrimaryKey) String() string {
+	var out bytes.Buffer
+	out.WriteString(fmt.Sprintf("(PartitionKey: '%s'", string(k.PartitionKey)))
+	if len(k.SortKey) > 0 {
+		out.WriteString(fmt.Sprintf(", SortKey: '%s'", string(k.SortKey)))
+	}
+	out.WriteString(")")
+	return out.String()
 }
 
 type QueryResponse struct {
@@ -539,7 +550,7 @@ func (s *InnerStorage) Get(req *GetRequest) (*Entry, error) {
 	}
 	defer txn.Rollback()
 
-	entry, err := s.GetWithTxn(req, txn)
+	entry, err := s.GetWithTransaction(req, txn)
 	if err != nil {
 		return nil, err
 	}
@@ -547,7 +558,7 @@ func (s *InnerStorage) Get(req *GetRequest) (*Entry, error) {
 	return entry, txn.Commit()
 }
 
-func (s *InnerStorage) GetWithTxn(req *GetRequest, txn *Txn) (*Entry, error) {
+func (s *InnerStorage) GetWithTransaction(req *GetRequest, txn *Txn) (*Entry, error) {
 	tableMetadata, ok := s.TableMetaDatas[req.TableName]
 	if !ok {
 		return nil, fmt.Errorf("table %s not found", req.TableName)

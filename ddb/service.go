@@ -2,6 +2,7 @@ package ddb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
@@ -577,10 +578,135 @@ func (svc *Service) DescribeTable(ctx context.Context, input *dynamodb.DescribeT
 	}
 }
 
+const (
+	MAX_ACTION_REQUEST = 100
+)
+
+func (svc *Service) validateTransactWriteItemsInput(input *dynamodb.TransactWriteItemsInput) error {
+	if len(input.TransactItems) > MAX_ACTION_REQUEST {
+		return &ValidationException{
+			Message: fmt.Sprintf("Member must have length less than or equal to %d", MAX_ACTION_REQUEST),
+		}
+	}
+
+	primaryKeys := make(map[string]map[string]bool)
+	for _, writeItem := range input.TransactItems {
+		var pk *PrimaryKey
+		var tableName string
+		var err error
+		if writeItem.ConditionCheck != nil {
+			conditionCheck := writeItem.ConditionCheck
+
+			tableName = *conditionCheck.TableName
+			tableMetadata, ok := svc.tableMetadatas[tableName]
+			if !ok {
+				msg := "Cannot do operations on a non-existent table"
+				return &types.ResourceNotFoundException{
+					Message: &msg,
+				}
+			}
+			pk, err = svc.buildTablePrimaryKey(NewEntryFromItem(conditionCheck.Key), tableMetadata)
+			if err != nil {
+				return err
+			}
+		} else if writeItem.Put != nil {
+			put := writeItem.Put
+
+			tableName = *put.TableName
+			tableMetadata, ok := svc.tableMetadatas[tableName]
+			if !ok {
+				msg := "Cannot do operations on a non-existent table"
+				return &types.ResourceNotFoundException{
+					Message: &msg,
+				}
+			}
+			pk, err = svc.buildTablePrimaryKey(NewEntryFromItem(put.Item), tableMetadata)
+			if err != nil {
+				return err
+			}
+		} else if writeItem.Delete != nil {
+			deleteReq := writeItem.Delete
+
+			tableName = *deleteReq.TableName
+			tableMetadata, ok := svc.tableMetadatas[tableName]
+			if !ok {
+				msg := "Cannot do operations on a non-existent table"
+				return &types.ResourceNotFoundException{
+					Message: &msg,
+				}
+			}
+			pk, err = svc.buildTablePrimaryKey(NewEntryFromItem(deleteReq.Key), tableMetadata)
+			if err != nil {
+				return err
+			}
+		} else if writeItem.Update != nil {
+			update := writeItem.Update
+
+			tableName = *update.TableName
+			tableMetadata, ok := svc.tableMetadatas[tableName]
+			if !ok {
+				msg := "Cannot do operations on a non-existent table"
+				return &types.ResourceNotFoundException{
+					Message: &msg,
+				}
+			}
+			pk, err = svc.buildTablePrimaryKey(NewEntryFromItem(update.Key), tableMetadata)
+			if err != nil {
+				return err
+			}
+
+		}
+
+		if _, ok := primaryKeys[tableName]; !ok {
+			primaryKeys[tableName] = make(map[string]bool)
+		}
+		if _, ok := primaryKeys[tableName][pk.String()]; ok {
+			msg := "Transaction request cannot include multiple operations on one item"
+			return &ValidationException{
+				Message: msg,
+			}
+		}
+		primaryKeys[tableName][pk.String()] = true
+
+	}
+
+	return nil
+}
+
+// TODO: refactor it
+func (svc *Service) buildTablePrimaryKey(entry *Entry, table *TableMetaData) (*PrimaryKey, error) {
+	primaryKey := &PrimaryKey{
+		PartitionKey: make([]byte, 0),
+		SortKey:      make([]byte, 0),
+	}
+
+	pk, ok := entry.Body[table.PartitionKeySchema.AttributeName]
+	if !ok {
+		return primaryKey, errors.New("partitionKey not found")
+	}
+
+	primaryKey.PartitionKey = pk.Bytes()
+
+	if table.SortKeySchema != nil {
+		sk, ok := entry.Body[table.SortKeySchema.AttributeName]
+		if !ok {
+			return primaryKey, errors.New("sortKey not found")
+		}
+		primaryKey.SortKey = sk.Bytes()
+	}
+
+	return primaryKey, nil
+}
+
 func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.TransactWriteItemsInput) (*dynamodb.TransactWriteItemsOutput, error) {
 	// https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_TransactWriteItems.html
 	svc.tableLock.RLock()
 	defer svc.tableLock.RUnlock()
+
+	err := svc.validateTransactWriteItemsInput(input)
+	if err != nil {
+		return nil, err
+	}
 
 	txn, err := svc.storage.BeginTxn(false)
 	if err != nil {
@@ -589,9 +715,66 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 	defer txn.Rollback()
 
 	for _, writeItem := range input.TransactItems {
-		if writeItem.Put != nil {
-			// TODO: handle condition
+		if writeItem.ConditionCheck != nil {
+			conditionCheck := writeItem.ConditionCheck
+			tableName := *conditionCheck.TableName
+			if _, ok := svc.tableMetadatas[tableName]; !ok {
+				msg := "Cannot do operations on a non-existent table"
+				err = &types.ResourceNotFoundException{
+					Message: &msg,
+				}
+				return nil, err
+			}
 
+			var condition *Condition
+			if conditionCheck.ConditionExpression == nil || *conditionCheck.ConditionExpression == "" {
+				return nil, &ValidationException{
+					Message: "The expression can not be empty;",
+				}
+			}
+
+			condition, err = BuildCondition(
+				*conditionCheck.ConditionExpression,
+				conditionCheck.ExpressionAttributeNames,
+				NewEntryFromItem(conditionCheck.ExpressionAttributeValues).Body,
+			)
+			if err != nil {
+				return nil, &ValidationException{
+					Message: err.Error(),
+				}
+			}
+
+			key := NewEntryFromItem(conditionCheck.Key)
+			req := &GetRequest{
+				Entry:          key,
+				TableName:      tableName,
+				ConsistentRead: true,
+			}
+			entry, err := svc.storage.GetWithTransaction(req, txn)
+			if err != nil {
+				return nil, err
+			}
+
+			if entry == nil {
+				entry = &Entry{
+					Body: make(map[string]AttributeValue),
+				}
+			}
+			matched, err := condition.Check(entry)
+
+			if err != nil {
+				return nil, err
+			} else if matched {
+				continue
+			} else {
+				msg := "The conditional request failed"
+				err = &types.ConditionalCheckFailedException{
+					Message: &msg,
+				}
+				return nil, err
+			}
+
+		} else if writeItem.Put != nil {
 			put := writeItem.Put
 			tableName := *put.TableName
 			if _, ok := svc.tableMetadatas[tableName]; !ok {
@@ -626,8 +809,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 			if err != nil {
 				return nil, err
 			}
-		}
-		if writeItem.Delete != nil {
+		} else if writeItem.Delete != nil {
 			deleteReq := writeItem.Delete
 			tableName := *deleteReq.TableName
 			if _, ok := svc.tableMetadatas[tableName]; !ok {
@@ -666,8 +848,12 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 		}
 
 	}
-	//table
-	//svc.tableLock
-	return nil, fmt.Errorf("unimplemented")
+	err = txn.Commit()
+	if err != nil {
+		return nil, err
+	}
 
+	output := &dynamodb.TransactWriteItemsOutput{}
+
+	return output, nil
 }

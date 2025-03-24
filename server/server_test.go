@@ -610,6 +610,7 @@ func TestQuery(t *testing.T) {
 	}
 }
 
+// TODO: test different failure scenarios
 func TestTransactWriteItems(t *testing.T) {
 	shutdown := startServer()
 	defer shutdown()
@@ -621,6 +622,16 @@ func TestTransactWriteItems(t *testing.T) {
 
 	input := dynamodb.TransactWriteItemsInput{
 		TransactItems: []types.TransactWriteItem{
+			{
+				ConditionCheck: &types.ConditionCheck{
+					ConditionExpression: aws.String("attribute_not_exists(year)"),
+					Key: map[string]types.AttributeValue{
+						"year":  &types.AttributeValueMemberN{Value: "2025"},
+						"title": &types.AttributeValueMemberS{Value: "Hello World 2"},
+					},
+					TableName: aws.String("movie"),
+				},
+			},
 			{
 				Put: &types.Put{
 					Item: map[string]types.AttributeValue{
@@ -648,6 +659,10 @@ func TestTransactWriteItems(t *testing.T) {
 	}
 
 	for _, item := range input.TransactItems {
+		if item.Put == nil {
+			continue
+		}
+	
 		getItemInput := &dynamodb.GetItemInput{
 			Key: map[string]types.AttributeValue{
 				"year":  &types.AttributeValueMemberN{Value: "2025"},
@@ -660,8 +675,78 @@ func TestTransactWriteItems(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Expected no error, got %v", err)
 		}
-		if len(getItemOutput.Item) == 2 {
+		if len(getItemOutput.Item) == 0 {
 			t.Fatalf("Expected items, got %v", len(getItemOutput.Item))
+		}
+	}
+}
+
+func TestTransactWriteItemsWithTooManyRequest(t *testing.T) {
+	shutdown := startServer()
+	defer shutdown()
+	ddb := newDdbClient()
+	_, err := createTable(ddb)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	transactItems := make([]types.TransactWriteItem, 0)
+	for i := 0; i < 120; i++ {
+		transactItems = append(transactItems, types.TransactWriteItem{
+			Put: &types.Put{
+				Item: map[string]types.AttributeValue{
+					"year":  &types.AttributeValueMemberN{Value: "2025"},
+					"title": &types.AttributeValueMemberS{Value: fmt.Sprintf("Hello World %d", i)},
+				},
+				TableName: aws.String("movie"),
+			},
+		})
+	}
+	input := dynamodb.TransactWriteItemsInput{
+		TransactItems: transactItems,
+	}
+
+	_, err = ddb.TransactWriteItems(context.Background(), &input)
+	if err == nil {
+		t.Fatalf("Expected has error, got nil")
+	} else {
+		if !strings.Contains(err.Error(), "Member must have length less than or equal to 100") {
+			t.Fatalf("error message is unexpected, got %v", err)
+		}
+	}
+}
+
+func TestTransactWriteItemsWithDuplicatedKey(t *testing.T) {
+	shutdown := startServer()
+	defer shutdown()
+	ddb := newDdbClient()
+	_, err := createTable(ddb)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	transactItems := make([]types.TransactWriteItem, 0)
+	for i := 0; i < 3; i++ {
+		transactItems = append(transactItems, types.TransactWriteItem{
+			Put: &types.Put{
+				Item: map[string]types.AttributeValue{
+					"year":  &types.AttributeValueMemberN{Value: "2025"},
+					"title": &types.AttributeValueMemberS{Value: fmt.Sprintf("Hello World")},
+				},
+				TableName: aws.String("movie"),
+			},
+		})
+	}
+	input := dynamodb.TransactWriteItemsInput{
+		TransactItems: transactItems,
+	}
+
+	_, err = ddb.TransactWriteItems(context.Background(), &input)
+	if err == nil {
+		t.Fatalf("Expected has error, got nil")
+	} else {
+		if !strings.Contains(err.Error(), "Transaction request cannot include multiple operations on one item") {
+			t.Fatalf("error message is unexpected, got %v", err)
 		}
 	}
 }

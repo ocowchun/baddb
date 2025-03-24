@@ -130,6 +130,26 @@ func handleDdbError(w http.ResponseWriter, outputErr error) {
 		}
 
 		return
+	default:
+		w.WriteHeader(http.StatusInternalServerError)
+
+		errResponse := ErrorResponse{
+			Type:    "InternalServerError",
+			Message: outputErr.Error(),
+		}
+
+		bs, err := json.Marshal(errResponse)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, err = w.Write(bs)
+		if err != nil {
+			log.Printf("Error writing response: %v", err)
+			return
+		}
+
+		return
 
 	}
 }
