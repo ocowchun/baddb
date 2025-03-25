@@ -8,7 +8,7 @@ import (
 
 func TestLexer_NextToken(t *testing.T) {
 	content := `
-Id = :v1 AND PostedBy BETWEEN :v2a AND :v2b
+Id = :v1 AND PostedBy BETWEEN :v2a AND :v2b SET #pr.#5star[1] = :r5
 `
 	input := strings.NewReader(content)
 	tests := []struct {
@@ -27,6 +27,18 @@ Id = :v1 AND PostedBy BETWEEN :v2a AND :v2b
 		{token.AND, "AND"},
 		{token.COLON, ":"},
 		{token.IDENT, "v2b"},
+		{token.SET, "SET"},
+		{token.SHARP, "#"},
+		{token.IDENT, "pr"},
+		{token.DOT, "."},
+		{token.SHARP, "#"},
+		{token.IDENT, "5star"},
+		{token.LBRACKET, "["},
+		{token.INT, "1"},
+		{token.RBRACKET, "]"},
+		{token.EQ, "="},
+		{token.COLON, ":"},
+		{token.IDENT, "r5"},
 		{token.EOF, ""},
 	}
 

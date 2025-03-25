@@ -2,7 +2,6 @@ package token
 
 import (
 	"fmt"
-	"strings"
 )
 
 type TokenType uint8
@@ -37,6 +36,14 @@ const (
 	CONTAINS
 	SIZE
 	IN
+	IF_NOT_EXISTS
+	PLUS
+	MINUS
+	SET
+	LIST_APPEND
+	REMOVE
+	ADD
+	DELETE
 )
 
 func (t TokenType) String() string {
@@ -60,11 +67,11 @@ func (t TokenType) String() string {
 	case RBRACKET:
 		return "RBRACKET"
 	case LT:
-		return "LT"
+		return "<"
 	case GT:
-		return "GT"
+		return ">"
 	case DOT:
-		return "DOT"
+		return "."
 	case BETWEEN:
 		return "BETWEEN"
 	case AND:
@@ -80,11 +87,41 @@ func (t TokenType) String() string {
 	case STRING:
 		return "STRING"
 	case COLON:
-		return "COLON"
+		return ":"
 	case SHARP:
-		return "SHARP"
+		return "#"
 	case BEGINS_WITH:
 		return "begins_with"
+
+	case ATTRIBUTE_EXISTS:
+		return "attribute_exists"
+	case ATTRIBUTE_NOT_EXISTS:
+		return "attribute_not_exists"
+	case ATTRIBUTE_TYPE:
+		return "attribute_type"
+	case CONTAINS:
+		return "contains"
+	case SIZE:
+		return "size"
+	case IN:
+		return "IN"
+	case IF_NOT_EXISTS:
+		return "if_not_exists"
+	case PLUS:
+		return "+"
+	case MINUS:
+		return "-"
+	case SET:
+		return "SET"
+	case LIST_APPEND:
+		return "list_append"
+	case REMOVE:
+		return "REMOVE"
+	case ADD:
+		return "ADD"
+	case DELETE:
+		return "DELETE"
+
 	default:
 		panic(fmt.Sprintf("unknown token type: %d", t))
 	}
@@ -100,17 +137,23 @@ var keywords = map[string]TokenType{
 	"AND":                  AND,
 	"OR":                   OR,
 	"NOT":                  NOT,
-	"BEGINS_WITH":          BEGINS_WITH,
-	"ATTRIBUTE_EXISTS":     ATTRIBUTE_EXISTS,
-	"ATTRIBUTE_NOT_EXISTS": ATTRIBUTE_NOT_EXISTS,
-	"ATTRIBUTE_TYPE":       ATTRIBUTE_TYPE,
-	"CONTAINS":             CONTAINS,
-	"SIZE":                 SIZE,
 	"IN":                   IN,
+	"begins_with":          BEGINS_WITH,
+	"attribute_exists":     ATTRIBUTE_EXISTS,
+	"attribute_not_exists": ATTRIBUTE_NOT_EXISTS,
+	"attribute_type":       ATTRIBUTE_TYPE,
+	"contains":             CONTAINS,
+	"size":                 SIZE,
+	"if_not_exists":        IF_NOT_EXISTS,
+	"SET":                  SET,
+	"list_append":          LIST_APPEND,
+	"REMOVE":               REMOVE,
+	"ADD":                  ADD,
+	"DELETE":               DELETE,
 }
 
 func LookupIdent(ident string) TokenType {
-	if tok, ok := keywords[strings.ToUpper(ident)]; ok {
+	if tok, ok := keywords[ident]; ok {
 		return tok
 	}
 	return IDENT

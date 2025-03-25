@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/ocowchun/baddb/expression/token"
-	"strings"
 )
 
 type Node interface {
@@ -83,64 +82,6 @@ func (avi *AttributeValueIdentifier) String() string {
 	return fmt.Sprintf(":%s", avi.Name)
 }
 
-type LetStatement struct {
-	Token token.Token
-	Name  *Identifier
-	Value Expression
-}
-
-func (ls *LetStatement) statementNode() {}
-func (ls *LetStatement) TokenLiteral() string {
-	return ls.Token.Literal
-}
-func (ls *LetStatement) String() string {
-	var out bytes.Buffer
-	out.WriteString(ls.TokenLiteral() + " ")
-	out.WriteString(ls.Name.String())
-	out.WriteString(" = ")
-	if ls.Value != nil {
-		out.WriteString(ls.Value.String())
-	}
-	out.WriteString(";")
-	return out.String()
-}
-
-type ReturnStatement struct {
-	Token       token.Token
-	ReturnValue Expression
-}
-
-func (rs *ReturnStatement) statementNode() {
-}
-func (rs *ReturnStatement) TokenLiteral() string {
-	return rs.Token.Literal
-}
-func (rs *ReturnStatement) String() string {
-	var out bytes.Buffer
-	out.WriteString(rs.TokenLiteral() + " ")
-	if rs.ReturnValue != nil {
-		out.WriteString(rs.ReturnValue.String())
-	}
-	out.WriteString(";")
-	return out.String()
-}
-
-type ExpressionStatement struct {
-	Token      token.Token
-	Expression Expression
-}
-
-func (es *ExpressionStatement) statementNode() {}
-func (es *ExpressionStatement) TokenLiteral() string {
-	return es.Token.Literal
-}
-func (es *ExpressionStatement) String() string {
-	if es.Expression != nil {
-		return es.Expression.String()
-	}
-	return ""
-}
-
 // https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_Query.html#DDB-Query-request-KeyConditionExpression
 
 type PredicateType uint8
@@ -214,9 +155,7 @@ func (pe *BetweenPredicateExpression) String() string {
 }
 
 type BeginsWithPredicateExpression struct {
-	Token token.Token
-	//Name                    *Identifier
-	//AttributeNameIdentifier *AttributeNameIdentifier
+	Token         token.Token
 	AttributeName AttributeName
 	Value         *AttributeValueIdentifier
 }
@@ -268,256 +207,11 @@ type IntegerLiteral struct {
 	Value int64
 }
 
-func (il *IntegerLiteral) expressionNode() {}
 func (il *IntegerLiteral) TokenLiteral() string {
 	return il.Token.Literal
 }
 func (il *IntegerLiteral) String() string {
 	return il.Token.Literal
-}
-
-type PrefixExpression struct {
-	Token    token.Token // The prefix token, e.g. !
-	Operator string
-	Right    Expression
-}
-
-func (pe *PrefixExpression) expressionNode() {}
-func (pe *PrefixExpression) TokenLiteral() string {
-	return pe.Token.Literal
-}
-func (pe *PrefixExpression) String() string {
-	var out bytes.Buffer
-	out.WriteString("(")
-	out.WriteString(pe.Operator)
-	out.WriteString(pe.Right.String())
-	out.WriteString(")")
-	return out.String()
-}
-
-type InfixExpression struct {
-	Token    token.Token
-	Left     Expression
-	Operator string
-	Right    Expression
-}
-
-func (ie *InfixExpression) expressionNode() {}
-func (ie *InfixExpression) TokenLiteral() string {
-	return ie.Token.Literal
-}
-func (ie *InfixExpression) String() string {
-	var out bytes.Buffer
-	out.WriteString("(")
-	out.WriteString(ie.Left.String())
-	out.WriteString(" " + ie.Operator + " ")
-	out.WriteString(ie.Right.String())
-	out.WriteString(")")
-	return out.String()
-}
-
-type Boolean struct {
-	Token token.Token
-	Value bool
-}
-
-func (b *Boolean) expressionNode() {}
-func (b *Boolean) TokenLiteral() string {
-	return b.Token.Literal
-}
-func (b *Boolean) String() string {
-	return b.Token.Literal
-}
-
-type BlockStatement struct {
-	Token      token.Token
-	Statements []Statement
-}
-
-func (bs *BlockStatement) statementNode() {}
-func (bs *BlockStatement) TokenLiteral() string {
-	return bs.Token.Literal
-}
-func (bs *BlockStatement) String() string {
-	var out bytes.Buffer
-	for _, s := range bs.Statements {
-		out.WriteString(s.String())
-	}
-	return out.String()
-}
-
-type IfExpression struct {
-	Token       token.Token
-	Condition   Expression
-	Consequence *BlockStatement
-	Alternative *BlockStatement
-}
-
-func (ie *IfExpression) expressionNode() {}
-func (ie *IfExpression) TokenLiteral() string {
-	return ie.Token.Literal
-}
-func (ie *IfExpression) String() string {
-	var out bytes.Buffer
-	out.WriteString("if")
-	out.WriteString(ie.Condition.String())
-	out.WriteString(" ")
-	out.WriteString(ie.Consequence.String())
-	if ie.Alternative != nil {
-		out.WriteString("else ")
-		out.WriteString(ie.Alternative.String())
-	}
-	return out.String()
-}
-
-type FunctionLiteral struct {
-	Token      token.Token
-	Parameters []*Identifier
-	Body       *BlockStatement
-	Name       string
-}
-
-func (fl *FunctionLiteral) expressionNode() {}
-func (fl *FunctionLiteral) TokenLiteral() string {
-	return fl.Token.Literal
-}
-func (fl *FunctionLiteral) String() string {
-	var out bytes.Buffer
-	var params []string
-	for _, p := range fl.Parameters {
-		params = append(params, p.String())
-	}
-	out.WriteString(fl.TokenLiteral())
-	if fl.Name != "" {
-		out.WriteString(fmt.Sprintf(" <%s>", fl.Name))
-	}
-	out.WriteString("(")
-	out.WriteString(strings.Join(params, ", "))
-	out.WriteString(")")
-	out.WriteString(fl.Body.String())
-	return out.String()
-}
-
-type CallExpression struct {
-	Token     token.Token
-	Function  Expression
-	Arguments []Expression
-}
-
-func (ce *CallExpression) expressionNode() {}
-func (ce *CallExpression) TokenLiteral() string {
-	return ce.Token.Literal
-}
-func (ce *CallExpression) String() string {
-	var out bytes.Buffer
-	var args []string
-	for _, a := range ce.Arguments {
-		args = append(args, a.String())
-	}
-	out.WriteString(ce.Function.String())
-	out.WriteString("(")
-	out.WriteString(strings.Join(args, ", "))
-	out.WriteString(")")
-	return out.String()
-}
-
-type StringLiteral struct {
-	Token token.Token
-	Value string
-}
-
-func (sl *StringLiteral) expressionNode() {}
-func (sl *StringLiteral) TokenLiteral() string {
-	return sl.Token.Literal
-}
-func (sl *StringLiteral) String() string {
-	return sl.Token.Literal
-}
-
-type ArrayLiteral struct {
-	Token    token.Token
-	Elements []Expression
-}
-
-func (al *ArrayLiteral) expressionNode() {}
-func (al *ArrayLiteral) TokenLiteral() string {
-	return al.Token.Literal
-}
-func (al *ArrayLiteral) String() string {
-	var out bytes.Buffer
-	elements := make([]string, len(al.Elements))
-	for i, el := range al.Elements {
-		elements[i] = el.String()
-	}
-	out.WriteString("[")
-	out.WriteString(strings.Join(elements, ", "))
-	out.WriteString("]")
-	return out.String()
-}
-
-type IndexExpression struct {
-	Token token.Token
-	Left  Expression
-	Index Expression
-}
-
-func (ie *IndexExpression) expressionNode() {}
-func (ie *IndexExpression) TokenLiteral() string {
-	return ie.Token.Literal
-}
-func (ie *IndexExpression) String() string {
-	var out bytes.Buffer
-	out.WriteString("(")
-	out.WriteString(ie.Left.String())
-	out.WriteString("[")
-	out.WriteString(ie.Index.String())
-	out.WriteString("])")
-	return out.String()
-}
-
-type HashLiteral struct {
-	Token token.Token
-	Pairs map[Expression]Expression
-}
-
-func (hl *HashLiteral) expressionNode() {}
-func (hl *HashLiteral) TokenLiteral() string {
-	return hl.Token.Literal
-}
-func (hl *HashLiteral) String() string {
-	var output bytes.Buffer
-	var pairs []string
-	for key, value := range hl.Pairs {
-		pairs = append(pairs, key.String()+":"+value.String())
-	}
-	output.WriteString("{")
-	output.WriteString(strings.Join(pairs, ", "))
-	output.WriteString("}")
-	return output.String()
-}
-
-type MacroLiteral struct {
-	Token      token.Token
-	Parameters []*Identifier
-	Body       *BlockStatement
-}
-
-func (ml *MacroLiteral) expressionNode() {}
-func (ml *MacroLiteral) TokenLiteral() string {
-	return ml.Token.Literal
-}
-func (ml *MacroLiteral) String() string {
-	var output bytes.Buffer
-	var params = make([]string, len(ml.Parameters))
-	for i, p := range ml.Parameters {
-		params[i] = p.String()
-	}
-	output.WriteString(ml.TokenLiteral())
-	output.WriteString("(")
-	output.WriteString(strings.Join(params, ", "))
-	output.WriteString(")")
-	output.WriteString(ml.Body.String())
-	return output.String()
 }
 
 //function ::=
@@ -618,7 +312,10 @@ type AttributeNameOperand struct {
 	HasColon   bool
 }
 
-func (aop *AttributeNameOperand) operandNode() {}
+func (aop *AttributeNameOperand) operandNode()          {}
+func (aop *AttributeNameOperand) updateActionPath()     {}
+func (aop *AttributeNameOperand) setActionOperandNode() {}
+func (aop *AttributeNameOperand) setActionValue()       {}
 func (aop *AttributeNameOperand) String() string {
 	var out bytes.Buffer
 	if aop.HasSharp {
@@ -636,9 +333,10 @@ type IndexOperand struct {
 	Index int
 }
 
-func (iop *IndexOperand) operandNode() {
-
-}
+func (iop *IndexOperand) operandNode()          {}
+func (iop *IndexOperand) updateActionPath()     {}
+func (iop *IndexOperand) setActionOperandNode() {}
+func (iop *IndexOperand) setActionValue()       {}
 func (iop *IndexOperand) String() string {
 	return fmt.Sprintf("%s[%d]", iop.Left.String(), iop.Index)
 }
@@ -648,7 +346,10 @@ type DotOperand struct {
 	Right Operand
 }
 
-func (dop *DotOperand) operandNode() {}
+func (dop *DotOperand) operandNode()          {}
+func (dop *DotOperand) updateActionPath()     {}
+func (dop *DotOperand) setActionOperandNode() {}
+func (dop *DotOperand) setActionValue()       {}
 func (dop *DotOperand) String() string {
 	return fmt.Sprintf("%s.%s", dop.Left.String(), dop.Right.String())
 }
@@ -775,5 +476,212 @@ func (nc *NotConditionExpression) String() string {
 	var out bytes.Buffer
 	out.WriteString("NOT ")
 	out.WriteString(nc.Condition.String())
+	return out.String()
+}
+
+// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.UpdateExpressions.html
+type UpdateExpression struct {
+	Set    *SetClause
+	Remove *RemoveClause
+	Add    *AddClause
+	Delete *DeleteClause
+}
+
+func (exp *UpdateExpression) String() string {
+	var out bytes.Buffer
+	if exp.Set != nil {
+		if out.Len() > 0 {
+			out.WriteString(" ")
+		}
+		out.WriteString(exp.Set.String())
+	}
+	if exp.Remove != nil {
+		if out.Len() > 0 {
+			out.WriteString(" ")
+		}
+		out.WriteString(exp.Remove.String())
+	}
+	if exp.Add != nil {
+		if out.Len() > 0 {
+			out.WriteString(" ")
+		}
+		out.WriteString(exp.Add.String())
+	}
+	if exp.Delete != nil {
+		if out.Len() > 0 {
+			out.WriteString(" ")
+		}
+		out.WriteString(exp.Delete.String())
+	}
+	return out.String()
+}
+
+type SetClause struct {
+	Actions []*SetAction
+}
+
+func (sc *SetClause) String() string {
+	var out bytes.Buffer
+	out.WriteString("SET ")
+	for i, action := range sc.Actions {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(action.Path.String())
+		out.WriteString(" = ")
+		out.WriteString(action.Value.String())
+	}
+	return out.String()
+}
+
+type UpdateActionPath interface {
+	updateActionPath()
+	SetActionOperand
+}
+
+type SetActionOperand interface {
+	setActionOperandNode()
+	SetActionValue
+}
+
+type SetActionValue interface {
+	setActionValue()
+	String() string
+}
+
+type SetActionInfixExpression struct {
+	Left     SetActionOperand
+	Operator string
+	Right    SetActionOperand
+}
+
+func (infix *SetActionInfixExpression) setActionValue() {}
+func (infix *SetActionInfixExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString(infix.Left.String())
+	out.WriteString(" ")
+	out.WriteString(infix.Operator)
+	out.WriteString(" ")
+	out.WriteString(infix.Right.String())
+	return out.String()
+}
+
+type SetActionFunction interface {
+	setActionFunctionNode()
+	SetActionOperand
+}
+
+type IfNotExistsExpression struct {
+	Path  UpdateActionPath
+	Value SetActionValue
+}
+
+func (ine *IfNotExistsExpression) setActionFunctionNode() {}
+func (ine *IfNotExistsExpression) setActionOperandNode()  {}
+func (ine *IfNotExistsExpression) setActionValue()        {}
+func (ine *IfNotExistsExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString("if_not_exists(")
+	out.WriteString(ine.Path.String())
+	out.WriteString(", ")
+	out.WriteString(ine.Value.String())
+	out.WriteString(")")
+	return out.String()
+}
+
+type ListAppendExpression struct {
+	Target Operand
+	Source Operand
+}
+
+func (exp *ListAppendExpression) setActionFunctionNode() {}
+func (exp *ListAppendExpression) setActionOperandNode()  {}
+func (exp *ListAppendExpression) setActionValue()        {}
+func (exp *ListAppendExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString("list_append(")
+	out.WriteString(exp.Target.String())
+	out.WriteString(", ")
+	out.WriteString(exp.Source.String())
+	out.WriteString(")")
+	return out.String()
+}
+
+type SetAction struct {
+	Path  UpdateActionPath
+	Value SetActionValue
+}
+
+type RemoveClause struct {
+	Paths []UpdateActionPath
+}
+
+func (exp *RemoveClause) String() string {
+	var out bytes.Buffer
+	out.WriteString("REMOVE ")
+	for i, path := range exp.Paths {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(path.String())
+	}
+	return out.String()
+}
+
+type AddClause struct {
+	Actions []*AddAction
+}
+
+func (exp *AddClause) String() string {
+	var out bytes.Buffer
+	out.WriteString("ADD ")
+	for i, action := range exp.Actions {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(action.String())
+	}
+	return out.String()
+}
+
+type AddAction struct {
+	Path  UpdateActionPath
+	Value UpdateActionPath
+}
+
+func (exp *AddAction) String() string {
+	var out bytes.Buffer
+	out.WriteString(exp.Path.String())
+	out.WriteString(" ")
+	out.WriteString(exp.Value.String())
+	return out.String()
+}
+
+type DeleteClause struct {
+	Actions []*DeleteAction
+}
+
+func (exp *DeleteClause) String() string {
+	var out bytes.Buffer
+	out.WriteString("DELETE ")
+	for i, action := range exp.Actions {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(action.String())
+	}
+	return out.String()
+}
+
+type DeleteAction struct {
+	Path   UpdateActionPath
+	Subset *AttributeNameOperand
+}
+
+func (exp *DeleteAction) String() string {
+	var out bytes.Buffer
+	out.WriteString(exp.Path.String())
+	out.WriteString(" ")
+	out.WriteString(exp.Subset.String())
 	return out.String()
 }

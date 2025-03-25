@@ -124,3 +124,41 @@ func TestParseConditionExpression(t *testing.T) {
 		}
 	}
 }
+
+func TestParseUpdateExpression(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"SET attributeName = :attributeValue", "SET attributeName = :attributeValue"},
+		{"SET ProductCategory = :c, Price = :p", "SET ProductCategory = :c, Price = :p"},
+		{"SET RelatedItems[1] = :ri", "SET RelatedItems[1] = :ri"},
+		{"SET #pr.#5star[1] = :r5, #pr.#3star = :r3", "SET #pr.#5star[1] = :r5, #pr.#3star = :r3"},
+		{"SET Price = Price - :p", "SET Price = Price - :p"},
+		{"SET Price = Price + :p", "SET Price = Price + :p"},
+		{"SET #ri = list_append(#ri, :vals)", "SET #ri = list_append(#ri, :vals)"},
+		{"SET #ri = list_append(:vals, #ri)", "SET #ri = list_append(:vals, #ri)"},
+		{"SET Price = if_not_exists(Price, :p)", "SET Price = if_not_exists(Price, :p)"},
+		{"REMOVE Brand, InStock, QuantityOnHand", "REMOVE Brand, InStock, QuantityOnHand"},
+		{"REMOVE RelatedItems[1], RelatedItems[2]", "REMOVE RelatedItems[1], RelatedItems[2]"},
+		{"ADD QuantityOnHand :q", "ADD QuantityOnHand :q"},
+		{"DELETE Color :p", "DELETE Color :p"},
+		{"SET Price = Price - :p REMOVE InStock", "SET Price = Price - :p REMOVE InStock"},
+		{"SET RelatedItems[1] = :newValue, Price = :newPrice", "SET RelatedItems[1] = :newValue, Price = :newPrice"},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(strings.NewReader(tt.input))
+		p := New(l)
+
+		exp, err := p.parseUpdateExpression()
+		if err != nil {
+			t.Fatalf("unexpected error: %v when parsing %s", err, tt.input)
+		}
+
+		if exp.String() != tt.expected {
+			t.Fatalf("expected %s but got %s", tt.expected, exp.String())
+		}
+	}
+
+}

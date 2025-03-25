@@ -6,23 +6,18 @@ import (
 	"github.com/ocowchun/baddb/expression/ast"
 	"github.com/ocowchun/baddb/expression/lexer"
 	"github.com/ocowchun/baddb/expression/token"
-	"log"
 	"strconv"
 )
 
 type Parser struct {
-	l              *lexer.Lexer
-	curToken       token.Token
-	peekToken      token.Token
-	prefixParseFns map[token.TokenType]prefixParseFn
-	infixParseFns  map[token.TokenType]infixParseFn
+	l         *lexer.Lexer
+	curToken  token.Token
+	peekToken token.Token
 }
 
 func New(l *lexer.Lexer) *Parser {
 	p := &Parser{
-		l:              l,
-		prefixParseFns: make(map[token.TokenType]prefixParseFn),
-		infixParseFns:  make(map[token.TokenType]infixParseFn),
+		l: l,
 	}
 	// Read two tokens, so curToken and peekToken are both set
 	p.nextToken()
@@ -207,14 +202,6 @@ func (p *Parser) parseOperator() (string, error) {
 	return op, nil
 }
 
-func (p *Parser) registerPrefix(tokenType token.TokenType, fn prefixParseFn) {
-	p.prefixParseFns[tokenType] = fn
-}
-
-func (p *Parser) registerInfix(tokenType token.TokenType, fn infixParseFn) {
-	p.infixParseFns[tokenType] = fn
-}
-
 func (p *Parser) nextToken() {
 	p.curToken = p.peekToken
 	p.peekToken = p.l.NextToken()
@@ -235,16 +222,11 @@ func (p *Parser) expectPeek(tokenType token.TokenType) bool {
 	return false
 }
 
-type (
-	prefixParseFn func() (ast.Expression, error)
-	infixParseFn  func(ast.Expression) (ast.Expression, error)
-)
-
 func (p *Parser) parseIdentifier() (ast.Expression, error) {
 	return &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}, nil
 }
 
-func (p *Parser) parseIntegerLiteral() (ast.Expression, error) {
+func (p *Parser) parseIntegerLiteral() (*ast.IntegerLiteral, error) {
 	lit := &ast.IntegerLiteral{Token: p.curToken}
 	value, err := strconv.ParseInt(p.curToken.Literal, 0, 64)
 	if err != nil {
@@ -282,7 +264,6 @@ func (p *Parser) parseAttributeValueIdentifier() (ast.Expression, error) {
 // AND
 // OR
 // https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.OperatorsAndFunctions.html#Expressions.OperatorsAndFunctions.Precedence
-
 const (
 	PRECEDENCE_LOWEST uint8 = iota
 	PRECEDENCE_OR
@@ -351,10 +332,6 @@ func (p *Parser) parseParameters() ([]*ast.Identifier, error) {
 	}
 
 	return parameters, nil
-}
-
-func (p *Parser) parseStringLiteral() (ast.Expression, error) {
-	return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}, nil
 }
 
 func (p *Parser) isFunctionCondition() bool {
@@ -505,7 +482,6 @@ func (p *Parser) parseConditionExpression(precedence uint8) (ast.ConditionExpres
 }
 
 func (p *Parser) parseInfixConditionExpression(left ast.ConditionExpression) (ast.ConditionExpression, error) {
-	log.Println("parseInfixConditionExpression")
 	infixOp := p.curToken
 	precedence := p.curPrecedence()
 	p.nextToken()
@@ -665,21 +641,21 @@ func (p *Parser) parseFunctionConditionExpression() (ast.FunctionExpression, err
 	}
 }
 
-func (p *Parser) parseOperand() (ast.Operand, error) {
-
-	var operand ast.Operand
+func (p *Parser) parseAttributeNameOperand() (*ast.AttributeNameOperand, error) {
 	if p.curTokenIs(token.IDENT) {
 		i, err := p.parseIdentifier()
 		if err != nil {
 			return nil, err
 		}
+
 		identifier, ok := i.(*ast.Identifier)
 		if !ok {
 			return nil, fmt.Errorf("failed to parse identifier")
 		}
-		operand = &ast.AttributeNameOperand{
+
+		return &ast.AttributeNameOperand{
 			Identifier: identifier,
-		}
+		}, nil
 	} else if p.curTokenIs(token.SHARP) {
 		p.nextToken()
 		i, err := p.parseIdentifier()
@@ -690,10 +666,10 @@ func (p *Parser) parseOperand() (ast.Operand, error) {
 		if !ok {
 			return nil, fmt.Errorf("failed to parse identifier")
 		}
-		operand = &ast.AttributeNameOperand{
+		return &ast.AttributeNameOperand{
 			Identifier: identifier,
 			HasSharp:   true,
-		}
+		}, nil
 	} else if p.curTokenIs(token.COLON) {
 		p.nextToken()
 		i, err := p.parseIdentifier()
@@ -704,11 +680,19 @@ func (p *Parser) parseOperand() (ast.Operand, error) {
 		if !ok {
 			return nil, fmt.Errorf("failed to parse identifier")
 		}
-		operand = &ast.AttributeNameOperand{
+		return &ast.AttributeNameOperand{
 			Identifier: identifier,
 			HasColon:   true,
-		}
-	} else if p.curTokenIs(token.SIZE) {
+		}, nil
+	} else {
+		return nil, fmt.Errorf("failed to parse attribute name")
+	}
+}
+
+func (p *Parser) parseOperand() (ast.Operand, error) {
+
+	var operand ast.Operand
+	if p.curTokenIs(token.SIZE) {
 		if !p.expectPeek(token.LPAREN) {
 			return nil, fmt.Errorf("failed to parse LPAREN")
 		}
@@ -728,7 +712,11 @@ func (p *Parser) parseOperand() (ast.Operand, error) {
 		}, nil
 
 	} else {
-		return nil, fmt.Errorf("unexpected token %v", p.curToken)
+		attributeNameOperand, err := p.parseAttributeNameOperand()
+		if err != nil {
+			return nil, err
+		}
+		operand = attributeNameOperand
 	}
 
 	if p.peekTokenIs(token.DOT) {
@@ -746,14 +734,11 @@ func (p *Parser) parseOperand() (ast.Operand, error) {
 		p.nextToken()
 		p.nextToken()
 
-		parseIntLiteral, err := p.parseIntegerLiteral()
+		i, err := p.parseIntegerLiteral()
 		if err != nil {
 			return nil, err
 		}
-		i, ok := parseIntLiteral.(*ast.IntegerLiteral)
-		if !ok {
-			return nil, fmt.Errorf("failed to parse integer literal")
-		}
+
 		if !p.expectPeek(token.RBRACKET) {
 			return nil, fmt.Errorf("failed to parse RBRACKET")
 		}
@@ -765,4 +750,308 @@ func (p *Parser) parseOperand() (ast.Operand, error) {
 	}
 
 	return operand, nil
+}
+
+func (p *Parser) parseUpdateExpression() (*ast.UpdateExpression, error) {
+	updateExpression := &ast.UpdateExpression{}
+	for !p.curTokenIs(token.EOF) {
+		switch p.curToken.Type {
+		case token.SET:
+			if updateExpression.Set != nil {
+				return nil, fmt.Errorf("The \"SET\" section can only be used once in an update expression;")
+			}
+			set, err := p.parseSetClause()
+			if err != nil {
+				return nil, err
+			}
+			updateExpression.Set = set
+		case token.REMOVE:
+			if updateExpression.Remove != nil {
+				return nil, fmt.Errorf("The \"REMOVE\" section can only be used once in an update expression;")
+			}
+			remove, err := p.parseRemoveClause()
+			if err != nil {
+				return nil, err
+			}
+			updateExpression.Remove = remove
+		case token.ADD:
+			if updateExpression.Add != nil {
+				return nil, fmt.Errorf("The \"ADD\" section can only be used once in an update expression;")
+			}
+
+			add, err := p.parseAddClause()
+			if err != nil {
+				return nil, err
+			}
+			updateExpression.Add = add
+		case token.DELETE:
+			if updateExpression.Delete != nil {
+				return nil, fmt.Errorf("The \"DELETE\" section can only be used once in an update expression;")
+			}
+
+			deleteClause, err := p.parseDeleteClause()
+			if err != nil {
+				return nil, err
+			}
+			updateExpression.Delete = deleteClause
+		case token.EOF:
+			break
+		default:
+			return nil, fmt.Errorf("unexpected token %v", p.curToken)
+		}
+
+		p.nextToken()
+
+	}
+
+	return updateExpression, nil
+}
+
+func (p *Parser) parseSetClause() (*ast.SetClause, error) {
+	setClause := &ast.SetClause{
+		Actions: make([]*ast.SetAction, 0),
+	}
+	for {
+		p.nextToken()
+
+		path, err := p.parseUpdateActionPath()
+		if err != nil {
+			return nil, err
+		}
+
+		if !p.expectPeek(token.EQ) {
+			return nil, fmt.Errorf("expected EQ got %v", p.peekToken)
+		}
+		p.nextToken()
+
+		value, err := p.parseSetActionValue()
+		if err != nil {
+			return nil, err
+		}
+
+		setClause.Actions = append(setClause.Actions, &ast.SetAction{
+			Path:  path,
+			Value: value,
+		})
+
+		if p.peekTokenIs(token.COMMA) {
+			p.nextToken()
+		} else {
+			break
+		}
+	}
+
+	return setClause, nil
+}
+
+func (p *Parser) parseUpdateActionPath() (ast.UpdateActionPath, error) {
+	op, err := p.parseOperand()
+	if err != nil {
+		return nil, err
+	}
+
+	path, ok := op.(ast.UpdateActionPath)
+	if !ok {
+		return nil, fmt.Errorf("failed to parse path")
+	}
+
+	return path, nil
+}
+
+func (p *Parser) parseSetActionValue() (ast.SetActionValue, error) {
+	left, err := p.parseSetActionOperand()
+	if err != nil {
+		return nil, err
+	}
+
+	if p.peekTokenIs(token.PLUS) || p.peekTokenIs(token.MINUS) {
+		p.nextToken()
+
+		operator := p.curToken.Literal
+		p.nextToken()
+
+		right, err := p.parseSetActionOperand()
+		if err != nil {
+			return nil, err
+		}
+
+		return &ast.SetActionInfixExpression{
+			Left:     left,
+			Operator: operator,
+			Right:    right,
+		}, nil
+	}
+
+	return left, nil
+}
+
+func (p *Parser) parseSetActionOperand() (ast.SetActionOperand, error) {
+	if p.curTokenIs(token.IF_NOT_EXISTS) {
+		return p.parseIfNotExistsExpression()
+	} else if p.curTokenIs(token.LIST_APPEND) {
+		return p.parseListAppendExpression()
+	}
+
+	return p.parseUpdateActionPath()
+}
+
+func (p *Parser) parseIfNotExistsExpression() (*ast.IfNotExistsExpression, error) {
+	if !p.curTokenIs(token.IF_NOT_EXISTS) {
+		return nil, fmt.Errorf("expected if_not_exists got %v", p.curToken)
+	}
+	if !p.expectPeek(token.LPAREN) {
+		return nil, fmt.Errorf("expected `(` got %v", p.peekToken)
+	}
+	p.nextToken()
+
+	path, err := p.parseUpdateActionPath()
+	if err != nil {
+		return nil, err
+	}
+
+	if !p.expectPeek(token.COMMA) {
+		return nil, fmt.Errorf("expected `,` got %v", p.peekToken)
+	}
+	p.nextToken()
+
+	value, err := p.parseSetActionValue()
+	if err != nil {
+		return nil, err
+	}
+
+	if !p.expectPeek(token.RPAREN) {
+		return nil, fmt.Errorf("expected `)` got %v", p.peekToken)
+	}
+
+	return &ast.IfNotExistsExpression{
+		Path:  path,
+		Value: value,
+	}, nil
+}
+
+func (p *Parser) parseListAppendExpression() (*ast.ListAppendExpression, error) {
+	if !p.curTokenIs(token.LIST_APPEND) {
+		return nil, fmt.Errorf("expected list_append got %v", p.curToken)
+	}
+	if !p.expectPeek(token.LPAREN) {
+		return nil, fmt.Errorf("expected `(` got %v", p.peekToken)
+	}
+	p.nextToken()
+
+	target, err := p.parseOperand()
+	if err != nil {
+		return nil, err
+	}
+
+	if !p.expectPeek(token.COMMA) {
+		return nil, fmt.Errorf("expected ',' got %v", p.peekToken)
+	}
+	p.nextToken()
+
+	source, err := p.parseOperand()
+	if err != nil {
+		return nil, err
+	}
+
+	if !p.expectPeek(token.RPAREN) {
+		return nil, fmt.Errorf("expected `)` got %v", p.peekToken)
+	}
+
+	return &ast.ListAppendExpression{
+		Target: target,
+		Source: source,
+	}, nil
+}
+
+func (p *Parser) parseRemoveClause() (*ast.RemoveClause, error) {
+	removeClause := &ast.RemoveClause{
+		Paths: make([]ast.UpdateActionPath, 0),
+	}
+	for {
+		p.nextToken()
+
+		path, err := p.parseUpdateActionPath()
+
+		if err != nil {
+			return nil, err
+		}
+		removeClause.Paths = append(removeClause.Paths, path)
+
+		if p.peekTokenIs(token.COMMA) {
+			p.nextToken()
+		} else {
+			break
+		}
+	}
+
+	return removeClause, nil
+}
+
+func (p *Parser) parseAddClause() (*ast.AddClause, error) {
+	addClause := &ast.AddClause{
+		Actions: make([]*ast.AddAction, 0),
+	}
+
+	for {
+		p.nextToken()
+
+		path, err := p.parseUpdateActionPath()
+		if err != nil {
+			return nil, err
+		}
+		p.nextToken()
+
+		value, err := p.parseUpdateActionPath()
+		if err != nil {
+			return nil, err
+		}
+
+		addClause.Actions = append(addClause.Actions, &ast.AddAction{
+			Path:  path,
+			Value: value,
+		})
+
+		if p.peekTokenIs(token.COMMA) {
+			p.nextToken()
+		} else {
+			break
+		}
+	}
+
+	return addClause, nil
+}
+
+func (p *Parser) parseDeleteClause() (*ast.DeleteClause, error) {
+	deleteClause := &ast.DeleteClause{
+		Actions: make([]*ast.DeleteAction, 0),
+	}
+	for {
+		p.nextToken()
+
+		path, err := p.parseUpdateActionPath()
+		if err != nil {
+			return nil, err
+		}
+
+		p.nextToken()
+		subset, err := p.parseAttributeNameOperand()
+		if err != nil {
+			return nil, err
+		} else if !subset.HasColon {
+			return nil, fmt.Errorf("expected subset to have colon")
+		}
+
+		deleteClause.Actions = append(deleteClause.Actions, &ast.DeleteAction{
+			Path:   path,
+			Subset: subset,
+		})
+
+		if p.peekTokenIs(token.COMMA) {
+			p.nextToken()
+		} else {
+			break
+		}
+	}
+
+	return deleteClause, nil
 }
