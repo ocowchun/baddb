@@ -151,7 +151,7 @@ func TestParseUpdateExpression(t *testing.T) {
 		l := lexer.New(strings.NewReader(tt.input))
 		p := New(l)
 
-		exp, err := p.parseUpdateExpression()
+		exp, err := p.ParseUpdateExpression()
 		if err != nil {
 			t.Fatalf("unexpected error: %v when parsing %s", err, tt.input)
 		}

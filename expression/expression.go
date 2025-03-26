@@ -20,3 +20,10 @@ func ParseConditionExpression(content string) (ast.ConditionExpression, error) {
 
 	return p.ParseConditionExpression()
 }
+
+func ParseUpdateExpression(content string) (*ast.UpdateExpression, error) {
+	l := lexer.New(strings.NewReader(content))
+	p := parser.New(l)
+
+	return p.ParseUpdateExpression()
+}

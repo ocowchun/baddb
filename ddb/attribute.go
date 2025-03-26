@@ -210,9 +210,12 @@ func (a AttributeValue) Equal(other AttributeValue) bool {
 		if other.L == nil {
 			return false
 		}
+		if len(*a.L) != len(*other.L) {
+			return false
+		}
 
-		for _, v := range *a.L {
-			if !v.Equal(other) {
+		for i, v := range *a.L {
+			if !v.Equal((*other.L)[i]) {
 				return false
 			}
 		}
@@ -276,6 +279,51 @@ func (a AttributeValue) Equal(other AttributeValue) bool {
 	}
 
 	panic("unreachable")
+}
+
+func (a AttributeValue) Clone() AttributeValue {
+	clonedVal := AttributeValue{}
+
+	if a.B != nil {
+		b := make([]byte, len(*a.B))
+		copy(b, *a.B)
+		clonedVal.B = &b
+	} else if a.Bool != nil {
+		b := *a.Bool
+		clonedVal.Bool = &b
+	} else if a.L != nil {
+		l := make([]AttributeValue, len(*a.L))
+		for i, v := range *a.L {
+			l[i] = v.Clone()
+		}
+		clonedVal.L = &l
+	} else if a.M != nil {
+		m := make(map[string]AttributeValue)
+		for k, v := range *a.M {
+			m[k] = v.Clone()
+		}
+		clonedVal.M = &m
+	} else if a.N != nil {
+		n := *a.N
+		clonedVal.N = &n
+	} else if a.NS != nil {
+		ns := make([]string, len(*a.NS))
+		copy(ns, *a.NS)
+		clonedVal.NS = &ns
+	} else if a.NULL != nil {
+		null := *a.NULL
+		clonedVal.NULL = &null
+	} else if a.S != nil {
+		s := *a.S
+		clonedVal.S = &s
+	} else if a.SS != nil {
+		ss := make([]string, len(*a.SS))
+		copy(ss, *a.SS)
+		clonedVal.SS = &ss
+	} else {
+		panic("unreachable")
+	}
+	return clonedVal
 }
 
 func (a AttributeValue) ToDdbAttributeValue() types.AttributeValue {

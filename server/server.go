@@ -213,7 +213,7 @@ func (svr *DdbServer) Handler(w http.ResponseWriter, req *http.Request) {
 
 	id := uuid.New()
 	w.Header().Set("X-Amzn-Requestid", id.String())
-	log.Println("received request", id.String(), targetAction)
+	log.Printf("received %s request, requestId=%s\n", targetAction, id.String())
 	switch targetAction {
 	case "BatchGetItem":
 		genericHandler(
@@ -314,6 +314,22 @@ func (svr *DdbServer) Handler(w http.ResponseWriter, req *http.Request) {
 				return encoding.EncodePutItemOutput(i.(*dynamodb.PutItemOutput))
 			},
 		)
+
+	case "UpdateItem":
+		genericHandler(
+			w,
+			req,
+			func(bs io.ReadCloser) (interface{}, error) {
+				return encoding.DecodeUpdateItemInput(bs)
+			},
+			func(ctx context.Context, input interface{}) (interface{}, error) {
+				return svr.inner.UpdateItem(ctx, input.(*dynamodb.UpdateItemInput))
+			},
+			func(i interface{}) ([]byte, error) {
+				return encoding.EncodeUpdateItemOutput(i.(*dynamodb.UpdateItemOutput))
+			},
+		)
+
 	case "GetItem":
 		genericHandler(
 			w,

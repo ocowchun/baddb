@@ -343,6 +343,71 @@ func (svc *Service) PutItem(ctx context.Context, input *dynamodb.PutItemInput) (
 	}
 }
 
+func (svc *Service) UpdateItem(ctx context.Context, input *dynamodb.UpdateItemInput) (*dynamodb.UpdateItemOutput, error) {
+	svc.tableLock.RLock()
+	defer svc.tableLock.RUnlock()
+
+	tableName := *input.TableName
+	if _, ok := svc.tableMetadatas[tableName]; ok {
+		if input.UpdateExpression == nil {
+			msg := "UpdateExpression must be provided"
+			err := &ValidationException{
+				Message: msg,
+			}
+			return nil, err
+		}
+
+		updateOperation, err := BuildUpdateOperation(
+			*input.UpdateExpression,
+			input.ExpressionAttributeNames,
+			NewEntryFromItem(input.ExpressionAttributeValues).Body)
+		if err != nil {
+			return nil, &ValidationException{
+				Message: err.Error(),
+			}
+		}
+
+		var condition *Condition
+		if input.ConditionExpression != nil {
+			condition, err = BuildCondition(
+				*input.ConditionExpression,
+				input.ExpressionAttributeNames,
+				NewEntryFromItem(input.ExpressionAttributeValues).Body,
+			)
+			if err != nil {
+				return nil, &ValidationException{
+					Message: err.Error(),
+				}
+			}
+		}
+
+		req := &UpdateRequest{
+			Key:             NewEntryFromItem(input.Key),
+			UpdateOperation: updateOperation,
+			TableName:       tableName,
+			Condition:       condition,
+		}
+		res, err := svc.storage.Update(req)
+		if err != nil {
+			return nil, err
+		}
+
+		// TODO: consider ReturnValues
+		output := &dynamodb.UpdateItemOutput{
+			Attributes: NewItemFromEntry(res.NewEntry.Body),
+		}
+
+		return output, nil
+	} else {
+		msg := "Cannot do operations on a non-existent table"
+		err := &types.ResourceNotFoundException{
+			Message: &msg,
+		}
+		return nil, err
+	}
+
+}
+
 func (svc *Service) DeleteItem(ctx context.Context, input *dynamodb.DeleteItemInput) (*dynamodb.DeleteItemOutput, error) {
 	svc.tableLock.RLock()
 	defer svc.tableLock.RUnlock()
@@ -379,7 +444,6 @@ func (svc *Service) DeleteItem(ctx context.Context, input *dynamodb.DeleteItemIn
 
 		return output, nil
 	} else {
-		fmt.Println("table not found")
 		msg := "Cannot do operations on a non-existent table"
 		err := &types.ResourceNotFoundException{
 			Message: &msg,

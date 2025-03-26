@@ -689,40 +689,18 @@ func (p *Parser) parseAttributeNameOperand() (*ast.AttributeNameOperand, error) 
 	}
 }
 
-func (p *Parser) parseOperand() (ast.Operand, error) {
-
-	var operand ast.Operand
-	if p.curTokenIs(token.SIZE) {
-		if !p.expectPeek(token.LPAREN) {
-			return nil, fmt.Errorf("failed to parse LPAREN")
-		}
-		p.nextToken()
-
-		path, err := p.parseOperand()
-		if err != nil {
-			return nil, err
-		}
-
-		if !p.expectPeek(token.RPAREN) {
-			return nil, fmt.Errorf("failed to parse RPAREN")
-		}
-
-		return &ast.SizeOperand{
-			Path: path,
-		}, nil
-
-	} else {
-		attributeNameOperand, err := p.parseAttributeNameOperand()
-		if err != nil {
-			return nil, err
-		}
-		operand = attributeNameOperand
+func (p *Parser) parsePathOperand() (ast.PathOperand, error) {
+	var operand ast.PathOperand
+	attributeNameOperand, err := p.parseAttributeNameOperand()
+	if err != nil {
+		return nil, err
 	}
+	operand = attributeNameOperand
 
 	if p.peekTokenIs(token.DOT) {
 		p.nextToken()
 		p.nextToken()
-		rightOperand, err := p.parseOperand()
+		rightOperand, err := p.parsePathOperand()
 		if err != nil {
 			return nil, err
 		}
@@ -752,7 +730,32 @@ func (p *Parser) parseOperand() (ast.Operand, error) {
 	return operand, nil
 }
 
-func (p *Parser) parseUpdateExpression() (*ast.UpdateExpression, error) {
+func (p *Parser) parseOperand() (ast.Operand, error) {
+	if p.curTokenIs(token.SIZE) {
+		if !p.expectPeek(token.LPAREN) {
+			return nil, fmt.Errorf("failed to parse LPAREN")
+		}
+		p.nextToken()
+
+		path, err := p.parseOperand()
+		if err != nil {
+			return nil, err
+		}
+
+		if !p.expectPeek(token.RPAREN) {
+			return nil, fmt.Errorf("failed to parse RPAREN")
+		}
+
+		return &ast.SizeOperand{
+			Path: path,
+		}, nil
+
+	} else {
+		return p.parsePathOperand()
+	}
+}
+
+func (p *Parser) ParseUpdateExpression() (*ast.UpdateExpression, error) {
 	updateExpression := &ast.UpdateExpression{}
 	for !p.curTokenIs(token.EOF) {
 		switch p.curToken.Type {
@@ -938,7 +941,7 @@ func (p *Parser) parseListAppendExpression() (*ast.ListAppendExpression, error) 
 	}
 	p.nextToken()
 
-	target, err := p.parseOperand()
+	target, err := p.parsePathOperand()
 	if err != nil {
 		return nil, err
 	}
@@ -948,7 +951,7 @@ func (p *Parser) parseListAppendExpression() (*ast.ListAppendExpression, error) 
 	}
 	p.nextToken()
 
-	source, err := p.parseOperand()
+	source, err := p.parsePathOperand()
 	if err != nil {
 		return nil, err
 	}
@@ -995,9 +998,11 @@ func (p *Parser) parseAddClause() (*ast.AddClause, error) {
 	for {
 		p.nextToken()
 
-		path, err := p.parseUpdateActionPath()
+		attributeNameOperand, err := p.parseAttributeNameOperand()
 		if err != nil {
 			return nil, err
+		} else if attributeNameOperand.HasColon {
+			return nil, fmt.Errorf("Invalid UpdateExpression: Syntax error; token: \"%s\"", attributeNameOperand.String())
 		}
 		p.nextToken()
 
@@ -1007,7 +1012,7 @@ func (p *Parser) parseAddClause() (*ast.AddClause, error) {
 		}
 
 		addClause.Actions = append(addClause.Actions, &ast.AddAction{
-			Path:  path,
+			Path:  attributeNameOperand,
 			Value: value,
 		})
 
@@ -1028,9 +1033,11 @@ func (p *Parser) parseDeleteClause() (*ast.DeleteClause, error) {
 	for {
 		p.nextToken()
 
-		path, err := p.parseUpdateActionPath()
+		attributeNameOperand, err := p.parseAttributeNameOperand()
 		if err != nil {
 			return nil, err
+		} else if attributeNameOperand.HasColon {
+			return nil, fmt.Errorf("Invalid UpdateExpression: Syntax error; token: \"%s\"", attributeNameOperand.String())
 		}
 
 		p.nextToken()
@@ -1042,7 +1049,7 @@ func (p *Parser) parseDeleteClause() (*ast.DeleteClause, error) {
 		}
 
 		deleteClause.Actions = append(deleteClause.Actions, &ast.DeleteAction{
-			Path:   path,
+			Path:   attributeNameOperand,
 			Subset: subset,
 		})
 

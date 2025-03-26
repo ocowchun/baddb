@@ -49,13 +49,6 @@ type EntryWithKey struct {
 	Entry *Entry
 }
 
-type Entry struct {
-
-	//PartitionKey *AttributeValue
-	//SortKey      *AttributeValue
-	Body map[string]AttributeValue
-}
-
 type EntryWrapper struct {
 	Entry     *Entry
 	IsDeleted bool
@@ -239,6 +232,86 @@ func (s *InnerStorage) Put(req *PutRequest) error {
 	}
 
 	return txn.Commit()
+}
+
+type UpdateRequest struct {
+	Key             *Entry
+	UpdateOperation *UpdateOperation
+	TableName       string
+	Condition       *Condition
+}
+
+func (s *InnerStorage) Update(req *UpdateRequest) (*UpdateResponse, error) {
+	txn, err := s.BeginTxn(false)
+	if err != nil {
+		return nil, err
+	}
+	defer txn.Rollback()
+
+	res, err := s.UpdateWithTransaction(req, txn)
+	if err != nil {
+		return nil, err
+
+	}
+
+	return res, txn.Commit()
+}
+
+type UpdateResponse struct {
+	OldEntry *Entry
+	NewEntry *Entry
+}
+
+func (s *InnerStorage) UpdateWithTransaction(req *UpdateRequest, txn *Txn) (*UpdateResponse, error) {
+	tableMetadata, ok := s.TableMetaDatas[req.TableName]
+	if !ok {
+		return nil, fmt.Errorf("table %s not found", req.TableName)
+	}
+
+	entry, err := s.GetWithTransaction(&GetRequest{
+		Entry:          req.Key,
+		ConsistentRead: true,
+		TableName:      req.TableName,
+	}, txn)
+	if err != nil {
+		return nil, err
+	}
+
+	if entry == nil {
+		entry = &Entry{
+			Body: make(map[string]AttributeValue),
+		}
+	}
+	oldEntry := entry.Clone()
+
+	if req.Condition != nil {
+		matched, err := req.Condition.Check(entry)
+		if err != nil {
+			return nil, err
+		}
+		if !matched {
+			return nil, &ConditionalCheckFailedException{"The conditional request failed"}
+		}
+	}
+
+	err = req.UpdateOperation.Perform(entry)
+	if err != nil {
+		return nil, err
+	}
+
+	entryWrapper := &EntryWrapper{
+		Entry:     entry,
+		IsDeleted: false,
+		CreatedAt: time.Now(),
+	}
+
+	// condition checked in above
+	err = s.put(entryWrapper, tableMetadata, nil, txn.tx)
+	if err != nil {
+		return nil, err
+	}
+
+	return &UpdateResponse{OldEntry: oldEntry, NewEntry: entry}, nil
 }
 
 type DeleteRequest struct {

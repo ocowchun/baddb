@@ -2,6 +2,7 @@ package ddb
 
 import (
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"log"
 	"testing"
 )
@@ -561,5 +562,142 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 			t.Fatalf("Query failed: expected 1 entry but got %d", len(entries))
 		}
 		assertEntry(entries[0], expectedEntries[2], t)
+	}
+}
+
+func TestInnerStorageUpdate(t *testing.T) {
+	storage := createTestInnerStorageWithGSI([]GlobalSecondaryIndexSetting{})
+	tableName := "test"
+
+	partitionKey := "foo"
+	sortKey := "bar"
+
+	tests := []struct {
+		name                      string
+		updateExpressionContent   string
+		expressionAttributeNames  map[string]string
+		expressionAttributeValues map[string]AttributeValue
+		expected                  map[string]AttributeValue
+		expectError               bool
+	}{
+		{
+			name:                    "Update existing attribute",
+			updateExpressionContent: "SET version = :newVersion",
+			expressionAttributeValues: map[string]AttributeValue{
+				":newVersion": {N: aws.String("2")},
+			},
+			expected: map[string]AttributeValue{
+				"partitionKey": {S: &partitionKey},
+				"sortKey":      {S: &sortKey},
+				"version":      {N: aws.String("2")},
+			},
+			expectError: false,
+		},
+		{
+			name:                    "Add new attribute",
+			updateExpressionContent: "SET newAttribute = :newValue",
+			expressionAttributeValues: map[string]AttributeValue{
+				":newValue": {S: aws.String("newValue")},
+			},
+			expected: map[string]AttributeValue{
+				"partitionKey": {S: &partitionKey},
+				"sortKey":      {S: &sortKey},
+				"version":      {N: aws.String("1")},
+				"newAttribute": {S: aws.String("newValue")},
+			},
+			expectError: false,
+		},
+		{
+			name:                      "Remove existing attribute",
+			updateExpressionContent:   "REMOVE version",
+			expressionAttributeValues: map[string]AttributeValue{},
+			expected: map[string]AttributeValue{
+				"partitionKey": {S: &partitionKey},
+				"sortKey":      {S: &sortKey},
+			},
+			expectError: false,
+		},
+		{
+			name:                    "Update non-existent attribute",
+			updateExpressionContent: "SET nonExistent = :value",
+			expressionAttributeValues: map[string]AttributeValue{
+				":value": {S: aws.String("value")},
+			},
+			expected: map[string]AttributeValue{
+				"partitionKey": {S: &partitionKey},
+				"sortKey":      {S: &sortKey},
+				"version":      {N: aws.String("1")},
+				"nonExistent":  {S: aws.String("value")},
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Insert initial entry
+			{
+				body := make(map[string]AttributeValue)
+				partitionKey := "foo"
+				body["partitionKey"] = AttributeValue{S: &partitionKey}
+				sortKey := "bar"
+				body["sortKey"] = AttributeValue{S: &sortKey}
+				version := "1"
+				body["version"] = AttributeValue{N: &version}
+				entry := &Entry{
+					Body: body,
+				}
+
+				err := storage.Put(&PutRequest{
+					Entry:     entry,
+					TableName: tableName,
+				})
+				if err != nil {
+					t.Fatalf("Put failed: %v", err)
+				}
+			}
+
+			body := make(map[string]AttributeValue)
+			body["partitionKey"] = AttributeValue{S: &partitionKey}
+			body["sortKey"] = AttributeValue{S: &sortKey}
+			key := &Entry{
+				Body: body,
+			}
+
+			operation, err := BuildUpdateOperation(
+				tt.updateExpressionContent,
+				tt.expressionAttributeNames,
+				tt.expressionAttributeValues,
+			)
+			if err != nil {
+				t.Fatalf("Unexpected error: %v, when build operation", err)
+			}
+
+			_, err = storage.Update(&UpdateRequest{
+				Key:             key,
+				UpdateOperation: operation,
+				TableName:       tableName,
+			})
+
+			if (err != nil) != tt.expectError {
+				t.Fatalf("Expected error: %v, got: %v", tt.expectError, err)
+			}
+
+			getReq := &GetRequest{
+				Entry:          key,
+				ConsistentRead: true,
+				TableName:      tableName,
+			}
+			updatedEntry, err := storage.Get(getReq)
+			if err != nil {
+				t.Fatalf("Get failed: %v", err)
+			}
+
+			for key, expectedValue := range tt.expected {
+				if val, ok := updatedEntry.Body[key]; !ok || !val.Equal(expectedValue) {
+					t.Fatalf("Expected %v for body %s, got %v", expectedValue, key, val)
+				}
+			}
+		})
 	}
 }

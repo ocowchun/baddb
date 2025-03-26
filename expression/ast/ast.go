@@ -306,6 +306,12 @@ type Operand interface {
 	String() string
 }
 
+type PathOperand interface {
+	Operand
+	SetActionValue
+	pathOperand()
+}
+
 type AttributeNameOperand struct {
 	Identifier *Identifier
 	HasSharp   bool
@@ -314,6 +320,7 @@ type AttributeNameOperand struct {
 
 func (aop *AttributeNameOperand) operandNode()          {}
 func (aop *AttributeNameOperand) updateActionPath()     {}
+func (aop *AttributeNameOperand) pathOperand()          {}
 func (aop *AttributeNameOperand) setActionOperandNode() {}
 func (aop *AttributeNameOperand) setActionValue()       {}
 func (aop *AttributeNameOperand) String() string {
@@ -329,12 +336,13 @@ func (aop *AttributeNameOperand) String() string {
 }
 
 type IndexOperand struct {
-	Left  Operand
+	Left  PathOperand
 	Index int
 }
 
 func (iop *IndexOperand) operandNode()          {}
 func (iop *IndexOperand) updateActionPath()     {}
+func (iop *IndexOperand) pathOperand()          {}
 func (iop *IndexOperand) setActionOperandNode() {}
 func (iop *IndexOperand) setActionValue()       {}
 func (iop *IndexOperand) String() string {
@@ -342,12 +350,15 @@ func (iop *IndexOperand) String() string {
 }
 
 type DotOperand struct {
-	Left  Operand
-	Right Operand
+	//Left  Operand
+	//Right Operand
+	Left  PathOperand
+	Right PathOperand
 }
 
 func (dop *DotOperand) operandNode()          {}
 func (dop *DotOperand) updateActionPath()     {}
+func (dop *DotOperand) pathOperand()          {}
 func (dop *DotOperand) setActionOperandNode() {}
 func (dop *DotOperand) setActionValue()       {}
 func (dop *DotOperand) String() string {
@@ -535,7 +546,8 @@ func (sc *SetClause) String() string {
 }
 
 type UpdateActionPath interface {
-	updateActionPath()
+	//updateActionPath()
+	PathOperand
 	SetActionOperand
 }
 
@@ -590,8 +602,8 @@ func (ine *IfNotExistsExpression) String() string {
 }
 
 type ListAppendExpression struct {
-	Target Operand
-	Source Operand
+	Target PathOperand
+	Source PathOperand
 }
 
 func (exp *ListAppendExpression) setActionFunctionNode() {}
@@ -645,7 +657,7 @@ func (exp *AddClause) String() string {
 }
 
 type AddAction struct {
-	Path  UpdateActionPath
+	Path  *AttributeNameOperand
 	Value UpdateActionPath
 }
 
@@ -674,7 +686,7 @@ func (exp *DeleteClause) String() string {
 }
 
 type DeleteAction struct {
-	Path   UpdateActionPath
+	Path   *AttributeNameOperand
 	Subset *AttributeNameOperand
 }
 

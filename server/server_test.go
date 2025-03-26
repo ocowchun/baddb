@@ -662,7 +662,7 @@ func TestTransactWriteItems(t *testing.T) {
 		if item.Put == nil {
 			continue
 		}
-	
+
 		getItemInput := &dynamodb.GetItemInput{
 			Key: map[string]types.AttributeValue{
 				"year":  &types.AttributeValueMemberN{Value: "2025"},
@@ -918,6 +918,61 @@ func TestDeleteWithCondition(t *testing.T) {
 	}
 	if len(getItemOutput.Item) != 0 {
 		t.Fatalf("Expected no item, got %v", len(getItemOutput.Item))
+	}
+}
+
+func TestUpdateItem(t *testing.T) {
+	shutdown := startServer()
+	defer shutdown()
+	ddb := newDdbClient()
+	_, err := createTable(ddb)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Insert an item
+	_, err = putItem(ddb)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Update the item
+	updateItemInput := &dynamodb.UpdateItemInput{
+		Key: map[string]types.AttributeValue{
+			"year":  &types.AttributeValueMemberN{Value: "2025"},
+			"title": &types.AttributeValueMemberS{Value: "Hello World"},
+		},
+		TableName:        aws.String("movie"),
+		UpdateExpression: aws.String("SET message = :newMessage"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":newMessage": &types.AttributeValueMemberS{Value: "Updated message"},
+		},
+	}
+
+	_, err = ddb.UpdateItem(context.Background(), updateItemInput)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Confirm the item is updated
+	getItemInput := &dynamodb.GetItemInput{
+		Key: map[string]types.AttributeValue{
+			"year":  &types.AttributeValueMemberN{Value: "2025"},
+			"title": &types.AttributeValueMemberS{Value: "Hello World"},
+		},
+		TableName:      aws.String("movie"),
+		ConsistentRead: aws.Bool(true),
+	}
+	getItemOutput, err := ddb.GetItem(context.Background(), getItemInput)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if val, ok := getItemOutput.Item["message"]; !ok {
+		t.Fatalf("Expected message to be present, got nil")
+	} else {
+		if val.(*types.AttributeValueMemberS).Value != "Updated message" {
+			t.Fatalf("Expected message to be 'Updated message', got %s", val.(*types.AttributeValueMemberS).Value)
+		}
 	}
 }
 

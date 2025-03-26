@@ -352,7 +352,6 @@ func EncodeCreateTableOutput(output *dynamodb.CreateTableOutput) ([]byte, error)
 }
 
 type putItemInput struct {
-	//Item      map[string]attributeValue
 	Item                                map[string]ddb.AttributeValue
 	TableName                           *string
 	ConditionExpression                 *string
@@ -401,6 +400,74 @@ func DecodePutItemInput(reader io.ReadCloser) (*dynamodb.PutItemInput, error) {
 
 func EncodePutItemOutput(output *dynamodb.PutItemOutput) ([]byte, error) {
 	bs, err := json.Marshal(output)
+	return bs, err
+}
+
+type updateItemInput struct {
+	Key                                 map[string]ddb.AttributeValue
+	TableName                           *string
+	ConditionExpression                 *string
+	ConditionalOperator                 types.ConditionalOperator
+	Expected                            map[string]types.ExpectedAttributeValue
+	ExpressionAttributeNames            map[string]string
+	ExpressionAttributeValues           map[string]ddb.AttributeValue
+	ReturnConsumedCapacity              types.ReturnConsumedCapacity
+	ReturnItemCollectionMetrics         types.ReturnItemCollectionMetrics
+	ReturnValues                        types.ReturnValue
+	ReturnValuesOnConditionCheckFailure types.ReturnValuesOnConditionCheckFailure
+	UpdateExpression                    *string
+}
+
+func DecodeUpdateItemInput(reader io.ReadCloser) (*dynamodb.UpdateItemInput, error) {
+	defer func() {
+		if err := reader.Close(); err != nil {
+			log.Printf("Error closing request body: %v", err)
+		}
+	}()
+
+	body, err := io.ReadAll(reader)
+
+	if err != nil {
+		return nil, err
+	}
+
+	var input2 updateItemInput
+	err = json.Unmarshal(body, &input2)
+
+	input := dynamodb.UpdateItemInput{
+		TableName:                           input2.TableName,
+		Key:                                 transformToDdbMap(input2.Key),
+		ConditionExpression:                 input2.ConditionExpression,
+		ConditionalOperator:                 input2.ConditionalOperator,
+		Expected:                            input2.Expected,
+		ExpressionAttributeNames:            input2.ExpressionAttributeNames,
+		ExpressionAttributeValues:           transformToDdbMap(input2.ExpressionAttributeValues),
+		ReturnConsumedCapacity:              input2.ReturnConsumedCapacity,
+		ReturnItemCollectionMetrics:         input2.ReturnItemCollectionMetrics,
+		ReturnValues:                        input2.ReturnValues,
+		ReturnValuesOnConditionCheckFailure: input2.ReturnValuesOnConditionCheckFailure,
+		UpdateExpression:                    input2.UpdateExpression,
+	}
+
+	return &input, nil
+}
+
+type updateItemOutput struct {
+	ConsumedCapacity *types.ConsumedCapacity
+
+	Attributes map[string]ddb.AttributeValue
+
+	ResultMetadata middleware.Metadata
+}
+
+func EncodeUpdateItemOutput(output *dynamodb.UpdateItemOutput) ([]byte, error) {
+	output2 := updateItemOutput{
+		ConsumedCapacity: output.ConsumedCapacity,
+		Attributes:       ddb.NewEntryFromItem(output.Attributes).Body,
+		ResultMetadata:   output.ResultMetadata,
+	}
+
+	bs, err := json.Marshal(output2)
 	return bs, err
 }
 
