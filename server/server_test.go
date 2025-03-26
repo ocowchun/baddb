@@ -619,6 +619,10 @@ func TestTransactWriteItems(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
+	_, err = putItem(ddb)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
 
 	input := dynamodb.TransactWriteItemsInput{
 		TransactItems: []types.TransactWriteItem{
@@ -650,6 +654,28 @@ func TestTransactWriteItems(t *testing.T) {
 					TableName: aws.String("movie"),
 				},
 			},
+			{
+				Delete: &types.Delete{
+					Key: map[string]types.AttributeValue{
+						"year":  &types.AttributeValueMemberN{Value: "2025"},
+						"title": &types.AttributeValueMemberS{Value: "Hello World"},
+					},
+					TableName: aws.String("movie"),
+				},
+			},
+			{
+				Update: &types.Update{
+					Key: map[string]types.AttributeValue{
+						"year":  &types.AttributeValueMemberN{Value: "2025"},
+						"title": &types.AttributeValueMemberS{Value: "Hello World 3"},
+					},
+					UpdateExpression: aws.String("SET message = :message"),
+					ExpressionAttributeValues: map[string]types.AttributeValue{
+						":message": &types.AttributeValueMemberS{Value: "You are my special "},
+					},
+					TableName: aws.String("movie"),
+				},
+			},
 		},
 	}
 
@@ -659,25 +685,41 @@ func TestTransactWriteItems(t *testing.T) {
 	}
 
 	for _, item := range input.TransactItems {
-		if item.Put == nil {
-			continue
+		if item.Put != nil {
+			getItemInput := &dynamodb.GetItemInput{
+				Key: map[string]types.AttributeValue{
+					"year":  &types.AttributeValueMemberN{Value: "2025"},
+					"title": &types.AttributeValueMemberS{Value: item.Put.Item["title"].(*types.AttributeValueMemberS).Value},
+				},
+				TableName:      aws.String("movie"),
+				ConsistentRead: aws.Bool(true),
+			}
+			getItemOutput, err := ddb.GetItem(context.Background(), getItemInput)
+			if err != nil {
+				t.Fatalf("Expected no error, got %v", err)
+			}
+			if len(getItemOutput.Item) == 0 {
+				t.Fatalf("Expected items, got %v", len(getItemOutput.Item))
+			}
+		} else if item.Delete != nil {
+			getItemInput := &dynamodb.GetItemInput{
+				Key: map[string]types.AttributeValue{
+					"year":  &types.AttributeValueMemberN{Value: "2025"},
+					"title": &types.AttributeValueMemberS{Value: item.Delete.Key["title"].(*types.AttributeValueMemberS).Value},
+				},
+				TableName:      aws.String("movie"),
+				ConsistentRead: aws.Bool(true),
+			}
+			getItemOutput, err := ddb.GetItem(context.Background(), getItemInput)
+			if err != nil {
+				t.Fatalf("Expected no error, got %v", err)
+			}
+			if len(getItemOutput.Item) != 0 {
+				t.Fatalf("Expected no items, got %v", len(getItemOutput.Item))
+			}
+
 		}
 
-		getItemInput := &dynamodb.GetItemInput{
-			Key: map[string]types.AttributeValue{
-				"year":  &types.AttributeValueMemberN{Value: "2025"},
-				"title": &types.AttributeValueMemberS{Value: item.Put.Item["title"].(*types.AttributeValueMemberS).Value},
-			},
-			TableName:      aws.String("movie"),
-			ConsistentRead: aws.Bool(true),
-		}
-		getItemOutput, err := ddb.GetItem(context.Background(), getItemInput)
-		if err != nil {
-			t.Fatalf("Expected no error, got %v", err)
-		}
-		if len(getItemOutput.Item) == 0 {
-			t.Fatalf("Expected items, got %v", len(getItemOutput.Item))
-		}
 	}
 }
 

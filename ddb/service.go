@@ -908,7 +908,60 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 			if err != nil {
 				return nil, err
 			}
+		} else if writeItem.Update != nil {
+			updateReq := writeItem.Update
+			tableName := *updateReq.TableName
+			if _, ok := svc.tableMetadatas[tableName]; !ok {
+				msg := "Cannot do operations on a non-existent table"
+				err = &types.ResourceNotFoundException{
+					Message: &msg,
+				}
+				return nil, err
+			}
 
+			if updateReq.UpdateExpression == nil {
+				msg := "UpdateExpression must be provided"
+				err := &ValidationException{
+					Message: msg,
+				}
+				return nil, err
+			}
+
+			updateOperation, err := BuildUpdateOperation(
+				*updateReq.UpdateExpression,
+				updateReq.ExpressionAttributeNames,
+				NewEntryFromItem(updateReq.ExpressionAttributeValues).Body)
+			if err != nil {
+				return nil, &ValidationException{
+					Message: err.Error(),
+				}
+			}
+
+			var condition *Condition
+			if updateReq.ConditionExpression != nil {
+				condition, err = BuildCondition(
+					*updateReq.ConditionExpression,
+					updateReq.ExpressionAttributeNames,
+					NewEntryFromItem(updateReq.ExpressionAttributeValues).Body,
+				)
+				if err != nil {
+					return nil, &ValidationException{
+						Message: err.Error(),
+					}
+				}
+			}
+
+			req := &UpdateRequest{
+				Key:             NewEntryFromItem(updateReq.Key),
+				UpdateOperation: updateOperation,
+				TableName:       tableName,
+				Condition:       condition,
+			}
+
+			_, err = svc.storage.UpdateWithTransaction(req, txn)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 	}

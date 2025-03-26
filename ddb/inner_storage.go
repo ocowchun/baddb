@@ -294,6 +294,13 @@ func (s *InnerStorage) UpdateWithTransaction(req *UpdateRequest, txn *Txn) (*Upd
 		}
 	}
 
+	// for non-exist key, add key after condition check to ensure it passed
+	if len(entry.Body) == 0 {
+		for k, v := range req.Key.Body {
+			entry.Body[k] = v
+		}
+	}
+
 	err = req.UpdateOperation.Perform(entry)
 	if err != nil {
 		return nil, err

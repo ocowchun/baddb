@@ -577,6 +577,7 @@ func TestInnerStorageUpdate(t *testing.T) {
 		updateExpressionContent   string
 		expressionAttributeNames  map[string]string
 		expressionAttributeValues map[string]AttributeValue
+		itemExists                bool
 		expected                  map[string]AttributeValue
 		expectError               bool
 	}{
@@ -586,6 +587,7 @@ func TestInnerStorageUpdate(t *testing.T) {
 			expressionAttributeValues: map[string]AttributeValue{
 				":newVersion": {N: aws.String("2")},
 			},
+			itemExists: true,
 			expected: map[string]AttributeValue{
 				"partitionKey": {S: &partitionKey},
 				"sortKey":      {S: &sortKey},
@@ -599,6 +601,7 @@ func TestInnerStorageUpdate(t *testing.T) {
 			expressionAttributeValues: map[string]AttributeValue{
 				":newValue": {S: aws.String("newValue")},
 			},
+			itemExists: true,
 			expected: map[string]AttributeValue{
 				"partitionKey": {S: &partitionKey},
 				"sortKey":      {S: &sortKey},
@@ -611,6 +614,7 @@ func TestInnerStorageUpdate(t *testing.T) {
 			name:                      "Remove existing attribute",
 			updateExpressionContent:   "REMOVE version",
 			expressionAttributeValues: map[string]AttributeValue{},
+			itemExists:                true,
 			expected: map[string]AttributeValue{
 				"partitionKey": {S: &partitionKey},
 				"sortKey":      {S: &sortKey},
@@ -623,6 +627,7 @@ func TestInnerStorageUpdate(t *testing.T) {
 			expressionAttributeValues: map[string]AttributeValue{
 				":value": {S: aws.String("value")},
 			},
+			itemExists: true,
 			expected: map[string]AttributeValue{
 				"partitionKey": {S: &partitionKey},
 				"sortKey":      {S: &sortKey},
@@ -631,12 +636,26 @@ func TestInnerStorageUpdate(t *testing.T) {
 			},
 			expectError: false,
 		},
+		{
+			name:                    "Update with non-existent item",
+			updateExpressionContent: "SET newAttribute = :newValue",
+			expressionAttributeValues: map[string]AttributeValue{
+				":newValue": {S: aws.String("newValue")},
+			},
+			itemExists: false,
+			expected: map[string]AttributeValue{
+				"partitionKey": {S: &partitionKey},
+				"sortKey":      {S: &sortKey},
+				"newAttribute": {S: aws.String("newValue")},
+			},
+			expectError: false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Insert initial entry
-			{
+			if tt.itemExists {
 				body := make(map[string]AttributeValue)
 				partitionKey := "foo"
 				body["partitionKey"] = AttributeValue{S: &partitionKey}
