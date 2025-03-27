@@ -575,8 +575,10 @@ func (s *InnerStorage) syncGlobalSecondaryIndices(primaryKey *PrimaryKey, entry 
 			gsiPartitionKey = entry.Entry.Body[*gsi.PartitionKeyName].Bytes()
 		}
 		var gsiSortKey []byte
-		if _, ok := entry.Entry.Body[*gsi.SortKeyName]; ok {
-			gsiSortKey = entry.Entry.Body[*gsi.SortKeyName].Bytes()
+		if gsi.SortKeyName != nil {
+			if _, ok := entry.Entry.Body[*gsi.SortKeyName]; ok {
+				gsiSortKey = entry.Entry.Body[*gsi.SortKeyName].Bytes()
+			}
 		}
 
 		gsiEntry := s.newGsiEntry(entry, gsi, table)
@@ -639,7 +641,9 @@ func (s *InnerStorage) newGsiEntry(entry *EntryWrapper, gsi GlobalSecondaryIndex
 		gsiEntry.Body[tableSortKeyName] = entry.Entry.Body[tableSortKeyName]
 	}
 	gsiEntry.Body[*gsi.PartitionKeyName] = entry.Entry.Body[*gsi.PartitionKeyName]
-	gsiEntry.Body[*gsi.SortKeyName] = entry.Entry.Body[*gsi.SortKeyName]
+	if gsi.SortKeyName != nil {
+		gsiEntry.Body[*gsi.SortKeyName] = entry.Entry.Body[*gsi.SortKeyName]
+	}
 	if entry.IsDeleted {
 		return &EntryWrapper{Entry: gsiEntry, IsDeleted: true, CreatedAt: entry.CreatedAt}
 	}

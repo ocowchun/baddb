@@ -417,6 +417,72 @@ func TestInnerStorageQuery(t *testing.T) {
 
 }
 
+func TestInnerStorageQueryWithGsiNoSortKey(t *testing.T) {
+	gsiName := "gsi1"
+	gsiPartitionKeyName := "gsi1PartitionKey"
+	gsiSettings := []GlobalSecondaryIndexSetting{
+		{
+			IndexName:        &gsiName,
+			PartitionKeyName: &gsiPartitionKeyName,
+			ProjectionType:   PROJECTION_TYPE_ALL,
+		},
+	}
+	storage := createTestInnerStorageWithGSI(gsiSettings)
+	count := 4
+	i := 0
+	expectedEntries := make([]*Entry, count)
+	for i < count {
+		body := make(map[string]AttributeValue)
+		partitionKey := "foo"
+		body["partitionKey"] = AttributeValue{S: &partitionKey}
+		sortKey := fmt.Sprintf("bar%d", i)
+		body["sortKey"] = AttributeValue{S: &sortKey}
+		gsiPartitionKey := fmt.Sprintf("gsiFoo")
+		body["gsi1PartitionKey"] = AttributeValue{S: &gsiPartitionKey}
+		gsiSortKey := fmt.Sprintf("gsiBar%d", i)
+		body["gsi1SortKey"] = AttributeValue{S: &gsiSortKey}
+		version := "1"
+		body["version"] = AttributeValue{N: &version}
+		entry := &Entry{
+			Body: body,
+		}
+
+		err := storage.Put(&PutRequest{
+			Entry:     entry,
+			TableName: "test",
+		})
+		if err != nil {
+			t.Fatalf("Put failed: %v", err)
+		}
+		expectedEntries[i] = entry
+		i += 1
+	}
+
+	// Test query with ScanIndexForward true
+	{
+
+		partitionKey := []byte("gsiFoo")
+		req := &Query{
+			IndexName:        &gsiName,
+			PartitionKey:     &partitionKey,
+			ScanIndexForward: true,
+			Limit:            2,
+			ConsistentRead:   true,
+			TableName:        "test",
+		}
+		res, err := storage.Query(req)
+		if err != nil {
+			t.Fatalf("Query failed: %v", err)
+		}
+		entries := res.Entries
+		if len(entries) != 2 {
+			t.Fatalf("Query failed: expected 2 Entries but got %d", len(entries))
+		}
+		assertEntry(entries[0], expectedEntries[0], t)
+		assertEntry(entries[1], expectedEntries[1], t)
+	}
+}
+
 func TestInnerStorageQueryWithGsi(t *testing.T) {
 	gsiName := "gsi1"
 	gsiPartitionKeyName := "gsi1PartitionKey"
