@@ -41,7 +41,7 @@ type tableDescription struct {
 
 	GlobalTableVersion *string
 
-	ItemCount *int64
+	ItemCount int64
 
 	KeySchema []types.KeySchemaElement
 
@@ -72,7 +72,7 @@ type tableDescription struct {
 
 	TableName *string
 
-	TableSizeBytes *int64
+	TableSizeBytes int64
 
 	TableStatus types.TableStatus
 
@@ -88,7 +88,7 @@ func newTableDescription(description *types.TableDescription) *tableDescription 
 		DeletionProtectionEnabled: description.DeletionProtectionEnabled,
 		GlobalSecondaryIndexes:    description.GlobalSecondaryIndexes,
 		GlobalTableVersion:        description.GlobalTableVersion,
-		ItemCount:                 description.ItemCount,
+		ItemCount:                 *description.ItemCount,
 		KeySchema:                 description.KeySchema,
 		LatestStreamArn:           description.LatestStreamArn,
 		LatestStreamLabel:         description.LatestStreamLabel,
@@ -104,7 +104,7 @@ func newTableDescription(description *types.TableDescription) *tableDescription 
 		TableClassSummary:         description.TableClassSummary,
 		TableId:                   description.TableId,
 		TableName:                 description.TableName,
-		TableSizeBytes:            description.TableSizeBytes,
+		TableSizeBytes:            *description.TableSizeBytes,
 		TableStatus:               description.TableStatus,
 		WarmThroughput:            description.WarmThroughput,
 	}
@@ -348,6 +348,7 @@ func EncodeCreateTableOutput(output *dynamodb.CreateTableOutput) ([]byte, error)
 	}
 
 	bs, err := json.Marshal(output2)
+	log.Println("createTableOutput ->", string(bs))
 	return bs, err
 }
 

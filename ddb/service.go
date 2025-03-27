@@ -132,8 +132,13 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 	//svc.tables[tableName] = table
 	svc.tableMetadatas[tableName] = meta
 
+	itemCount, err := svc.storage.QueryItemCount(tableName)
+	if err != nil {
+		return nil, err
+	}
+
 	output := dynamodb.CreateTableOutput{
-		TableDescription: meta.Description(),
+		TableDescription: meta.Description(itemCount),
 	}
 	return &output, nil
 }
@@ -601,7 +606,12 @@ func (svc *Service) DeleteTable(ctx context.Context, input *dynamodb.DeleteTable
 	tableName := *input.TableName
 	if _, ok := svc.tableMetadatas[tableName]; ok {
 		table := svc.tableMetadatas[tableName]
-		tableDescription := table.Description()
+
+		itemCount, err := svc.storage.QueryItemCount(tableName)
+		if err != nil {
+			return nil, err
+		}
+		tableDescription := table.Description(itemCount)
 		delete(svc.tableMetadatas, tableName)
 
 		// TODO: delete from storage
@@ -626,7 +636,11 @@ func (svc *Service) DescribeTable(ctx context.Context, input *dynamodb.DescribeT
 	tableName := *input.TableName
 	if _, ok := svc.tableMetadatas[tableName]; ok {
 		table := svc.tableMetadatas[tableName]
-		tableDescription := table.Description()
+		itemCount, err := svc.storage.QueryItemCount(tableName)
+		if err != nil {
+			return nil, err
+		}
+		tableDescription := table.Description(itemCount)
 
 		output := &dynamodb.DescribeTableOutput{
 			Table: tableDescription,

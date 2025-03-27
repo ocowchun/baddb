@@ -100,11 +100,13 @@ type InnerStorage struct {
 	db             *sql.DB
 	rwMutex        sync.RWMutex
 	TableMetaDatas map[string]*InnerTableMetadata
+	counter        atomic.Int32
 }
 
 type InnerTableMetadata struct {
-	Name                         string
-	GlobalSecondaryIndexSettings []GlobalSecondaryIndexSetting
+	Name string
+	//GlobalSecondaryIndexSettings []GlobalSecondaryIndexSetting
+	GlobalSecondaryIndexSettings map[string]GlobalSecondaryIndexSetting
 	PartitionKeySchema           *KeySchema
 	SortKeySchema                *KeySchema
 }
@@ -122,22 +124,38 @@ func NewInnerStorage() *InnerStorage {
 	}
 }
 
+func (s *InnerStorage) newTableName() string {
+	return fmt.Sprintf("table_%d", s.counter.Add(1))
+}
+
+func (s *InnerStorage) newGsiTableName() string {
+	return fmt.Sprintf("gsi_%d", s.counter.Add(1))
+}
+
 func (s *InnerStorage) CreateTable(meta *TableMetaData) error {
-	tableName := "table_" + meta.Name
+	tableName := s.newTableName()
 	sqlStmt := `
 	create table ` + tableName + `(primary_key blob not null primary key, body blob, partition_key blob, sort_key blob);
 	delete from ` + tableName + `;
 	create index idx_` + tableName + `_partiton_key_sort_key on ` + tableName + `(partition_key, sort_key);
 	`
 
-	globalSecondarySettings := meta.GlobalSecondaryIndexSettings
-	for _, gsi := range globalSecondarySettings {
-		gsiTableName := "gsi_" + tableName + "_" + *gsi.IndexName
+	globalSecondarySettings := make(map[string]GlobalSecondaryIndexSetting)
+	for _, gsi := range meta.GlobalSecondaryIndexSettings {
+		gsiTableName := s.newGsiTableName()
 		sqlStmt += `
 		create table ` + gsiTableName + ` (primary_key blob not null primary key, body blob, main_partition_key blob, main_sort_key blob, partition_key blob, sort_key blob);
 		delete from ` + gsiTableName + `;
 		create index idx_` + gsiTableName + `_partition_key_sort_key on ` + gsiTableName + `(partition_key, sort_key);
 		`
+
+		globalSecondarySettings[*gsi.IndexName] = GlobalSecondaryIndexSetting{
+			IndexName:        &gsiTableName,
+			PartitionKeyName: gsi.PartitionKeyName,
+			SortKeyName:      gsi.SortKeyName,
+			NonKeyAttributes: gsi.NonKeyAttributes,
+			ProjectionType:   gsi.ProjectionType,
+		}
 	}
 
 	_, err := s.db.Exec(sqlStmt)
@@ -153,6 +171,33 @@ func (s *InnerStorage) CreateTable(meta *TableMetaData) error {
 	s.TableMetaDatas[meta.Name] = innerTableMetadata
 
 	return nil
+}
+
+func (s *InnerStorage) QueryItemCount(tableName string) (int64, error) {
+	txn, err := s.BeginTxn(true)
+	if err != nil {
+		return 0, err
+	}
+	defer txn.Rollback()
+
+	tableMetadata, ok := s.TableMetaDatas[tableName]
+	if !ok {
+		return 0, fmt.Errorf("table %s not found", tableName)
+	}
+
+	stmt, err := txn.tx.Prepare("select count(1) from " + tableMetadata.Name)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+
+	var count int64
+	err = stmt.QueryRow().Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+
+	return count, txn.Commit()
 }
 
 type Txn struct {
@@ -519,7 +564,7 @@ func (s *InnerStorage) getTuple(primaryKey []byte, tableName string, txn *sql.Tx
 func (s *InnerStorage) syncGlobalSecondaryIndices(primaryKey *PrimaryKey, entry *EntryWrapper, txn *sql.Tx, table *InnerTableMetadata) error {
 	for _, gsi := range table.GlobalSecondaryIndexSettings {
 		// TODO: refactor it
-		tableName := "gsi_" + table.Name + "_" + *gsi.IndexName
+		tableName := *gsi.IndexName
 		tuple, err := s.getTuple(primaryKey.Bytes(), tableName, txn)
 		if err != nil {
 			return err
@@ -677,17 +722,11 @@ func (s *InnerStorage) Query(req *Query) (*QueryResponse, error) {
 
 	tableName := tableMetadata.Name
 	if req.IndexName != nil {
-		for _, gsi := range tableMetadata.GlobalSecondaryIndexSettings {
-			if *gsi.IndexName == *req.IndexName {
-				// TODO: refactor it
-				tableName = "gsi_" + tableMetadata.Name + "_" + *gsi.IndexName
-				break
-			}
-		}
-
-		if tableName == tableMetadata.Name {
+		gsi, ok := tableMetadata.GlobalSecondaryIndexSettings[*req.IndexName]
+		if !ok {
 			return nil, fmt.Errorf("index %s not found", *req.IndexName)
 		}
+		tableName = *gsi.IndexName
 	}
 
 	// Prepare the query statement

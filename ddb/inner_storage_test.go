@@ -720,3 +720,41 @@ func TestInnerStorageUpdate(t *testing.T) {
 		})
 	}
 }
+
+func TestInnerStorageQueryItemCount(t *testing.T) {
+	storage := createTestInnerStorageWithGSI([]GlobalSecondaryIndexSetting{})
+	tableName := "test"
+
+	// Insert items
+	for i := 0; i < 5; i++ {
+		body := make(map[string]AttributeValue)
+		partitionKey := fmt.Sprintf("foo%d", i)
+		body["partitionKey"] = AttributeValue{S: &partitionKey}
+		sortKey := fmt.Sprintf("bar%d", i)
+		body["sortKey"] = AttributeValue{S: &sortKey}
+		version := "1"
+		body["version"] = AttributeValue{N: &version}
+		entry := &Entry{
+			Body: body,
+		}
+
+		err := storage.Put(&PutRequest{
+			Entry:     entry,
+			TableName: tableName,
+		})
+		if err != nil {
+			t.Fatalf("Put failed: %v", err)
+		}
+	}
+
+	// Query item count
+	count, err := storage.QueryItemCount(tableName)
+	if err != nil {
+		t.Fatalf("QueryItemCount failed: %v", err)
+	}
+
+	// Verify item count
+	if count != 5 {
+		t.Fatalf("Expected item count to be 5, but got %d", count)
+	}
+}
