@@ -74,6 +74,34 @@ func (t *Tuple) prevEntry() *Entry {
 	}
 }
 
+func (t *Tuple) getEntry(consistentRead bool, readTs time.Time) *Entry {
+	if len(t.Entries) == 2 {
+		if consistentRead || t.Entries[1].CreatedAt.Before(readTs) {
+			if t.Entries[1].IsDeleted {
+				return nil
+			}
+			return t.Entries[1].Entry
+		} else {
+			if t.Entries[0].IsDeleted {
+				return nil
+			}
+			return t.Entries[0].Entry
+		}
+	} else if len(t.Entries) == 1 {
+		if consistentRead || t.Entries[0].CreatedAt.Before(readTs) {
+			if t.Entries[0].IsDeleted {
+				return nil
+			}
+			return t.Entries[0].Entry
+		} else {
+			return nil
+		}
+	} else {
+		// no entry
+		return nil
+	}
+}
+
 // return lastEntry, found
 func (t *Tuple) currentEntry() *Entry {
 	if len(t.Entries) == 0 {
@@ -101,11 +129,13 @@ type InnerStorage struct {
 	rwMutex        sync.RWMutex
 	TableMetaDatas map[string]*InnerTableMetadata
 	counter        atomic.Int32
+
+	// simulate how long to get the latest data, if syncDelay is 5 seconds then the latest data will be available after 5 seconds
+	syncDelay time.Duration
 }
 
 type InnerTableMetadata struct {
-	Name string
-	//GlobalSecondaryIndexSettings []GlobalSecondaryIndexSetting
+	Name                         string
 	GlobalSecondaryIndexSettings map[string]GlobalSecondaryIndexSetting
 	PartitionKeySchema           *KeySchema
 	SortKeySchema                *KeySchema
@@ -121,6 +151,8 @@ func NewInnerStorage() *InnerStorage {
 	return &InnerStorage{
 		db:             db,
 		TableMetaDatas: make(map[string]*InnerTableMetadata),
+		counter:        atomic.Int32{},
+		syncDelay:      time.Second * 5,
 	}
 }
 
@@ -706,11 +738,12 @@ func (s *InnerStorage) GetWithTransaction(req *GetRequest, txn *Txn) (*Entry, er
 		return nil, nil
 	}
 
-	if req.ConsistentRead {
-		return tuple.currentEntry(), nil
-	} else {
-		return tuple.prevEntry(), nil
-	}
+	readTs := s.readTs()
+	return tuple.getEntry(req.ConsistentRead, readTs), nil
+}
+
+func (s *InnerStorage) readTs() time.Time {
+	return time.Now().Add(s.syncDelay * -1)
 }
 
 func (s *InnerStorage) Query(req *Query) (*QueryResponse, error) {
@@ -767,6 +800,7 @@ func (s *InnerStorage) Query(req *Query) (*QueryResponse, error) {
 
 	var results []*Entry
 	scannedCount := 0
+	readTs := s.readTs()
 	for rows.Next() {
 		var body []byte
 		if err := rows.Scan(&body); err != nil {
@@ -779,10 +813,7 @@ func (s *InnerStorage) Query(req *Query) (*QueryResponse, error) {
 			return nil, err
 		}
 
-		entry := tuple.prevEntry()
-		if req.ConsistentRead {
-			entry = tuple.currentEntry()
-		}
+		entry := tuple.getEntry(req.ConsistentRead, readTs)
 
 		if entry != nil {
 			if req.SortKeyPredicate != nil {
