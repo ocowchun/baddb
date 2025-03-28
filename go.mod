@@ -1,6 +1,6 @@
 module github.com/ocowchun/baddb
 
-go 1.22.12
+go 1.23.0
 
 toolchain go1.23.7
 
@@ -25,4 +25,5 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sso v1.25.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.29.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.33.17 // indirect
+	golang.org/x/time v0.11.0 // indirect
 )

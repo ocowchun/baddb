@@ -110,7 +110,25 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 			NonKeyAttributes: nonKeyAttributes,
 			ProjectionType:   projectionType,
 		}
-
+	}
+	// api error ValidationException:
+	billingMode := BILLING_MODE_PAY_PER_REQUEST
+	if input.BillingMode == types.BillingModeProvisioned {
+		billingMode = BILLING_MODE_PROVISIONED
+		if input.ProvisionedThroughput == nil {
+			msg := "No provisioned throughput specified for the table"
+			err := &ValidationException{
+				Message: msg,
+			}
+			return nil, err
+		}
+		if input.ProvisionedThroughput.ReadCapacityUnits == nil || input.ProvisionedThroughput.WriteCapacityUnits == nil {
+			msg := "readCapacityUnits and writeCapacityUnits must be specified"
+			err := &ValidationException{
+				Message: msg,
+			}
+			return nil, err
+		}
 	}
 
 	meta := &TableMetaData{
@@ -122,6 +140,7 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 		PartitionKeySchema:           partitionKeySchema,
 		SortKeySchema:                sortKeySchema,
 		Name:                         tableName,
+		BillingMode:                  billingMode,
 	}
 	//table := NewTable(&meta)
 	err := svc.storage.CreateTable(meta)
@@ -335,6 +354,10 @@ func (svc *Service) PutItem(ctx context.Context, input *dynamodb.PutItemInput) (
 		}
 		err = svc.storage.Put(req)
 		if err != nil {
+			if errors.Is(err, RateLimitReachedError) {
+				return nil, ProvisionedThroughputExceededException
+
+			}
 			return nil, err
 		}
 		//TODO: add PutItemOutput
@@ -501,6 +524,13 @@ func (svc *Service) GetItem(ctx context.Context, input *dynamodb.GetItemInput) (
 		return nil, err
 	}
 }
+
+var (
+	provisionedThroughputExceededExceptionMessage = "The level of configured provisioned throughput for the table was exceeded. Consider increasing your provisioning level with the UpdateTable API."
+	ProvisionedThroughputExceededException        = &types.ProvisionedThroughputExceededException{
+		Message: &provisionedThroughputExceededExceptionMessage,
+	}
+)
 
 type ValidationException struct {
 	Message string

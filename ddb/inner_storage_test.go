@@ -1,13 +1,28 @@
 package ddb
 
 import (
+	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"log"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"testing"
 )
 
 func createTestInnerStorageWithGSI(gsiSettings []GlobalSecondaryIndexSetting) *InnerStorage {
+	return createTestInnerStorage(
+		0,
+		0,
+		BILLING_MODE_PAY_PER_REQUEST,
+		gsiSettings,
+	)
+}
+
+func createTestInnerStorage(
+	ReadCapacityUnits int64,
+	WriteCapacityUnits int64,
+	mode BillingMode,
+	gsiSettings []GlobalSecondaryIndexSetting,
+) *InnerStorage {
 	storage := NewInnerStorage()
 	tableMetaData := &TableMetaData{
 		Name:                         "test",
@@ -17,6 +32,11 @@ func createTestInnerStorageWithGSI(gsiSettings []GlobalSecondaryIndexSetting) *I
 		},
 		SortKeySchema: &KeySchema{
 			AttributeName: "sortKey",
+		},
+		BillingMode: mode,
+		ProvisionedThroughput: &types.ProvisionedThroughput{
+			ReadCapacityUnits:  &ReadCapacityUnits,
+			WriteCapacityUnits: &WriteCapacityUnits,
 		},
 	}
 	err := storage.CreateTable(tableMetaData)
@@ -67,7 +87,6 @@ func TestInnerStorageQueryWithGsiProjections(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		log.Println("projectionType: ", testCase.projectionType)
 
 		gsiName := "gsi1"
 		gsiPartitionKeyName := "gsi1PartitionKey"
@@ -259,6 +278,92 @@ func TestInnerStoragePutGetAndDelete(t *testing.T) {
 		t.Fatalf("Get failed: %v", err)
 	}
 	assertEntry(entry7, entryV2, t)
+}
+
+func TestInnerStorageReadLimitReached(t *testing.T) {
+	storage := createTestInnerStorage(
+		1,
+		1,
+		BILLING_MODE_PROVISIONED,
+		[]GlobalSecondaryIndexSetting{},
+	)
+	body := make(map[string]AttributeValue)
+	partitionKey := "foo"
+	body["partitionKey"] = AttributeValue{S: &partitionKey}
+	sortKey := "bar"
+	body["sortKey"] = AttributeValue{S: &sortKey}
+	version := "1"
+	body["version"] = AttributeValue{N: &version}
+	entry := &Entry{
+		Body: body,
+	}
+	tableName := "test"
+
+	err := storage.Put(&PutRequest{
+		Entry:     entry,
+		TableName: "test",
+	})
+	if err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	for i := 0; i < 10; i++ {
+		getReq := &GetRequest{
+			Entry:          entry,
+			ConsistentRead: true,
+			TableName:      tableName,
+		}
+		_, err = storage.Get(getReq)
+		if err != nil {
+			if errors.Is(err, RateLimitReachedError) {
+				return
+			}
+
+			t.Fatalf("Get failed: %v", err)
+		}
+	}
+
+	if err == nil {
+		t.Fatalf("Get should have failed with RateLimitReachedError")
+	}
+}
+
+func TestInnerStorageWriteLimitReached(t *testing.T) {
+	storage := createTestInnerStorage(
+		1,
+		1,
+		BILLING_MODE_PROVISIONED,
+		[]GlobalSecondaryIndexSetting{},
+	)
+	body := make(map[string]AttributeValue)
+	partitionKey := "foo"
+	body["partitionKey"] = AttributeValue{S: &partitionKey}
+	sortKey := "bar"
+	body["sortKey"] = AttributeValue{S: &sortKey}
+	version := "1"
+	body["version"] = AttributeValue{N: &version}
+	entry := &Entry{
+		Body: body,
+	}
+
+	var err error
+	for i := 0; i < 10; i++ {
+		err = storage.Put(&PutRequest{
+			Entry:     entry,
+			TableName: "test",
+		})
+
+		if err != nil {
+			if errors.Is(err, RateLimitReachedError) {
+				return
+			}
+
+			t.Fatalf("Get failed: %v", err)
+		}
+	}
+	if err == nil {
+		t.Fatalf("Put should have failed with RateLimitReachedError")
+	}
 }
 
 func assertEntry(actual *Entry, expected *Entry, t *testing.T) {

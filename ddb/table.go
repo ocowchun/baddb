@@ -19,7 +19,15 @@ type TableMetaData struct {
 	CreationDateTime             *time.Time
 	PartitionKeySchema           *KeySchema
 	SortKeySchema                *KeySchema
+	BillingMode                  BillingMode
 }
+
+type BillingMode uint8
+
+const (
+	BILLING_MODE_PROVISIONED BillingMode = iota
+	BILLING_MODE_PAY_PER_REQUEST
+)
 
 func (m *TableMetaData) Description(itemCount int64) *types.TableDescription {
 	tableSizeBytes := itemCount * 100
@@ -77,9 +85,12 @@ func (m *TableMetaData) Description(itemCount int64) *types.TableDescription {
 		})
 	}
 
-	// TODO: adjust capacity units later
 	readCapacityUnits := int64(0)
 	writeCapacityUnits := int64(0)
+	if m.ProvisionedThroughput != nil {
+		readCapacityUnits = *m.ProvisionedThroughput.ReadCapacityUnits
+		writeCapacityUnits = *m.ProvisionedThroughput.WriteCapacityUnits
+	}
 	provisionedThroughput := &types.ProvisionedThroughputDescription{
 		ReadCapacityUnits:  &readCapacityUnits,
 		WriteCapacityUnits: &writeCapacityUnits,

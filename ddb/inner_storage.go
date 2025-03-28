@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	_ "github.com/mattn/go-sqlite3"
+	"golang.org/x/time/rate"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -54,8 +55,6 @@ type EntryWrapper struct {
 	IsDeleted bool
 	CreatedAt time.Time
 }
-
-//type
 
 type Tuple struct {
 	Entries []EntryWrapper
@@ -134,11 +133,26 @@ type InnerStorage struct {
 	syncDelay time.Duration
 }
 
+type InnerTableGlobalSecondaryIndexSetting struct {
+	IndexTableName   string
+	PartitionKeyName *string
+	SortKeyName      *string
+	NonKeyAttributes []string
+	ProjectionType   ProjectionType
+	readRateLimiter  *rate.Limiter
+}
+
 type InnerTableMetadata struct {
-	Name                         string
-	GlobalSecondaryIndexSettings map[string]GlobalSecondaryIndexSetting
+	Name string
+	// TODO: create inner storage gsi struct to keep rate limiter
+	GlobalSecondaryIndexSettings map[string]InnerTableGlobalSecondaryIndexSetting
 	PartitionKeySchema           *KeySchema
 	SortKeySchema                *KeySchema
+	billingMode                  BillingMode
+	readCapacityUnits            int
+	writeCapacityUnits           int
+	readRateLimiter              *rate.Limiter
+	writeRateLimiter             *rate.Limiter
 }
 
 func NewInnerStorage() *InnerStorage {
@@ -172,7 +186,21 @@ func (s *InnerStorage) CreateTable(meta *TableMetaData) error {
 	create index idx_` + tableName + `_partiton_key_sort_key on ` + tableName + `(partition_key, sort_key);
 	`
 
-	globalSecondarySettings := make(map[string]GlobalSecondaryIndexSetting)
+	billingMode := BILLING_MODE_PAY_PER_REQUEST
+	readCapacity := 0
+	writeCapacity := 0
+	if meta.BillingMode == BILLING_MODE_PROVISIONED {
+		billingMode = BILLING_MODE_PROVISIONED
+		// For an item up to 4 KB, one read capacity unit (RCU) represents one strongly consistent read operation per
+		// second, or two eventually consistent read operations per second.
+		// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/provisioned-capacity-mode.html#read-write-capacity-units
+		readCapacity = int(*meta.ProvisionedThroughput.ReadCapacityUnits) * 2
+		writeCapacity = int(*meta.ProvisionedThroughput.WriteCapacityUnits)
+	}
+	readLimiter := rate.NewLimiter(rate.Limit(readCapacity), readCapacity)
+	writeLimiter := rate.NewLimiter(rate.Limit(writeCapacity), writeCapacity)
+
+	globalSecondarySettings := make(map[string]InnerTableGlobalSecondaryIndexSetting)
 	for _, gsi := range meta.GlobalSecondaryIndexSettings {
 		gsiTableName := s.newGsiTableName()
 		sqlStmt += `
@@ -181,14 +209,18 @@ func (s *InnerStorage) CreateTable(meta *TableMetaData) error {
 		create index idx_` + gsiTableName + `_partition_key_sort_key on ` + gsiTableName + `(partition_key, sort_key);
 		`
 
-		globalSecondarySettings[*gsi.IndexName] = GlobalSecondaryIndexSetting{
-			IndexName:        &gsiTableName,
+		readLimiter := rate.NewLimiter(rate.Limit(readCapacity), readCapacity)
+		globalSecondarySettings[*gsi.IndexName] = InnerTableGlobalSecondaryIndexSetting{
+			IndexTableName:   gsiTableName,
 			PartitionKeyName: gsi.PartitionKeyName,
 			SortKeyName:      gsi.SortKeyName,
 			NonKeyAttributes: gsi.NonKeyAttributes,
 			ProjectionType:   gsi.ProjectionType,
+			readRateLimiter:  readLimiter,
 		}
 	}
+
+	//meta.ProvisionedThroughput.readCapacity
 
 	_, err := s.db.Exec(sqlStmt)
 	if err != nil {
@@ -199,6 +231,11 @@ func (s *InnerStorage) CreateTable(meta *TableMetaData) error {
 		GlobalSecondaryIndexSettings: globalSecondarySettings,
 		PartitionKeySchema:           meta.PartitionKeySchema,
 		SortKeySchema:                meta.SortKeySchema,
+		billingMode:                  billingMode,
+		readCapacityUnits:            readCapacity,
+		writeCapacityUnits:           writeCapacity,
+		readRateLimiter:              readLimiter,
+		writeRateLimiter:             writeLimiter,
 	}
 	s.TableMetaDatas[meta.Name] = innerTableMetadata
 
@@ -345,6 +382,12 @@ func (s *InnerStorage) UpdateWithTransaction(req *UpdateRequest, txn *Txn) (*Upd
 		return nil, fmt.Errorf("table %s not found", req.TableName)
 	}
 
+	if tableMetadata.billingMode == BILLING_MODE_PROVISIONED {
+		if !tableMetadata.writeRateLimiter.AllowN(time.Now(), 1) {
+			return nil, RateLimitReachedError
+		}
+	}
+
 	entry, err := s.GetWithTransaction(&GetRequest{
 		Entry:          req.Key,
 		ConsistentRead: true,
@@ -426,6 +469,12 @@ func (s *InnerStorage) DeleteWithTransaction(req *DeleteRequest, txn *Txn) error
 		return fmt.Errorf("table %s not found", req.TableName)
 	}
 
+	if tableMetadata.billingMode == BILLING_MODE_PROVISIONED {
+		if !tableMetadata.writeRateLimiter.AllowN(time.Now(), 1) {
+			return RateLimitReachedError
+		}
+	}
+
 	entryWrapper := &EntryWrapper{
 		Entry:     req.Entry,
 		IsDeleted: true,
@@ -438,6 +487,12 @@ func (s *InnerStorage) PutWithTransaction(req *PutRequest, txn *Txn) error {
 	tableMetadata, ok := s.TableMetaDatas[req.TableName]
 	if !ok {
 		return fmt.Errorf("table %s not found", req.TableName)
+	}
+
+	if tableMetadata.billingMode == BILLING_MODE_PROVISIONED {
+		if !tableMetadata.writeRateLimiter.AllowN(time.Now(), 1) {
+			return RateLimitReachedError
+		}
 	}
 
 	entryWrapper := &EntryWrapper{
@@ -596,7 +651,7 @@ func (s *InnerStorage) getTuple(primaryKey []byte, tableName string, txn *sql.Tx
 func (s *InnerStorage) syncGlobalSecondaryIndices(primaryKey *PrimaryKey, entry *EntryWrapper, txn *sql.Tx, table *InnerTableMetadata) error {
 	for _, gsi := range table.GlobalSecondaryIndexSettings {
 		// TODO: refactor it
-		tableName := *gsi.IndexName
+		tableName := gsi.IndexTableName
 		tuple, err := s.getTuple(primaryKey.Bytes(), tableName, txn)
 		if err != nil {
 			return err
@@ -661,7 +716,7 @@ func (s *InnerStorage) syncGlobalSecondaryIndices(primaryKey *PrimaryKey, entry 
 	return nil
 }
 
-func (s *InnerStorage) newGsiEntry(entry *EntryWrapper, gsi GlobalSecondaryIndexSetting, table *InnerTableMetadata) *EntryWrapper {
+func (s *InnerStorage) newGsiEntry(entry *EntryWrapper, gsi InnerTableGlobalSecondaryIndexSetting, table *InnerTableMetadata) *EntryWrapper {
 	gsiEntry := &Entry{
 		Body: make(map[string]AttributeValue),
 	}
@@ -725,6 +780,16 @@ func (s *InnerStorage) GetWithTransaction(req *GetRequest, txn *Txn) (*Entry, er
 		return nil, fmt.Errorf("table %s not found", req.TableName)
 	}
 
+	if tableMetadata.billingMode == BILLING_MODE_PROVISIONED {
+		n := 1
+		if req.ConsistentRead {
+			n = 2
+		}
+		if !tableMetadata.readRateLimiter.AllowN(time.Now(), n) {
+			return nil, RateLimitReachedError
+		}
+	}
+
 	primaryKey, err := s.buildTablePrimaryKey(req.Entry, tableMetadata)
 	if err != nil {
 		return nil, nil
@@ -746,6 +811,10 @@ func (s *InnerStorage) readTs() time.Time {
 	return time.Now().Add(s.syncDelay * -1)
 }
 
+var (
+	RateLimitReachedError = errors.New("rate limit reached")
+)
+
 func (s *InnerStorage) Query(req *Query) (*QueryResponse, error) {
 	s.rwMutex.RLock()
 	defer s.rwMutex.RUnlock()
@@ -758,12 +827,14 @@ func (s *InnerStorage) Query(req *Query) (*QueryResponse, error) {
 	res := &QueryResponse{}
 
 	tableName := tableMetadata.Name
+	rateLimiter := tableMetadata.readRateLimiter
 	if req.IndexName != nil {
 		gsi, ok := tableMetadata.GlobalSecondaryIndexSettings[*req.IndexName]
 		if !ok {
 			return nil, fmt.Errorf("index %s not found", *req.IndexName)
 		}
-		tableName = *gsi.IndexName
+		tableName = gsi.IndexTableName
+		rateLimiter = gsi.readRateLimiter
 	}
 
 	// Prepare the query statement
@@ -805,6 +876,16 @@ func (s *InnerStorage) Query(req *Query) (*QueryResponse, error) {
 		var body []byte
 		if err := rows.Scan(&body); err != nil {
 			return nil, err
+		}
+
+		if tableMetadata.billingMode == BILLING_MODE_PROVISIONED {
+			n := 1
+			if req.ConsistentRead {
+				n = 2
+			}
+			if !rateLimiter.AllowN(time.Now(), n) {
+				return nil, RateLimitReachedError
+			}
 		}
 
 		var tuple Tuple

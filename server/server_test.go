@@ -1018,6 +1018,54 @@ func TestUpdateItem(t *testing.T) {
 	}
 }
 
+func TestProvisionedThroughputExceededException(t *testing.T) {
+	shutdown := startServer()
+	defer shutdown()
+
+	var ddb *dynamodb.Client
+	// minimize retries to test provisioned throughput exceeded exception
+	{
+		cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion("us-west-2"))
+		if err != nil {
+			log.Fatalf("unable to load SDK config, %v", err)
+		}
+
+		ddb = dynamodb.NewFromConfig(cfg, func(options *dynamodb.Options) {
+			options.BaseEndpoint = aws.String("http://localhost:8080")
+			options.RetryMaxAttempts = 1
+		})
+	}
+
+	_, err := createTable(ddb)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Insert items to exceed provisioned throughput
+	for i := 0; i < 1000; i++ {
+		putItemInput := &dynamodb.PutItemInput{
+			Item: map[string]types.AttributeValue{
+				"year":    &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", 2025+i)},
+				"title":   &types.AttributeValueMemberS{Value: fmt.Sprintf("Hello World %d", i)},
+				"message": &types.AttributeValueMemberS{Value: "your magic is mine"},
+			},
+			TableName: aws.String("movie"),
+		}
+
+		_, err := ddb.PutItem(context.Background(), putItemInput)
+		if err != nil {
+			var provisionedThroughputExceededException *types.ProvisionedThroughputExceededException
+			if errors.As(err, &provisionedThroughputExceededException) {
+				// Expected error
+				return
+			}
+			t.Fatalf("Expected ProvisionedThroughputExceededException, got %v", err)
+		}
+	}
+
+	t.Fatalf("Expected ProvisionedThroughputExceededException, but no error occurred")
+}
+
 func putItem(client *dynamodb.Client) (*dynamodb.PutItemOutput, error) {
 	putItemInput := &dynamodb.PutItemInput{
 		Item: map[string]types.AttributeValue{
@@ -1065,9 +1113,20 @@ func createTable(client *dynamodb.Client) (*dynamodb.CreateTableOutput, error) {
 			},
 			},
 			Projection: &types.Projection{ProjectionType: types.ProjectionTypeAll},
+			// TODO: add check
+			ProvisionedThroughput: &types.ProvisionedThroughput{
+				ReadCapacityUnits:  aws.Int64(5),
+				WriteCapacityUnits: aws.Int64(5),
+			},
 		}},
-		TableName:   aws.String("movie"),
-		BillingMode: types.BillingModePayPerRequest,
+		TableName: aws.String("movie"),
+		//BillingMode: types.BillingModePayPerRequest,
+
+		BillingMode: types.BillingModeProvisioned,
+		ProvisionedThroughput: &types.ProvisionedThroughput{
+			ReadCapacityUnits:  aws.Int64(5),
+			WriteCapacityUnits: aws.Int64(5),
+		},
 	}
 	return client.CreateTable(context.TODO(), createTableInput)
 }

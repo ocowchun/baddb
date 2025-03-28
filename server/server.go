@@ -81,7 +81,6 @@ func handleDdbError(w http.ResponseWriter, outputErr error) {
 		bs, err := json.Marshal(errResponse)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			// TODO describe reason
 			return
 		}
 		_, err = w.Write(bs)
