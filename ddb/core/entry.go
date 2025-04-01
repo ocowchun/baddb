@@ -1,4 +1,4 @@
-package ddb
+package core
 
 import (
 	"errors"
@@ -18,6 +18,46 @@ func (e *Entry) Clone() *Entry {
 	}
 	return &Entry{
 		Body: clonedBody,
+	}
+}
+
+func (e *Entry) Get(path PathOperand) (AttributeValue, error) {
+	return getValueFromPath(e.Body, path)
+}
+
+func getValueFromPath(entry map[string]AttributeValue, path PathOperand) (AttributeValue, error) {
+	switch path := path.(type) {
+	case *AttributeNameOperand:
+		key := path.Name
+		val, ok := entry[key]
+		if !ok {
+			return AttributeValue{}, fmt.Errorf("key %s not found", key)
+		}
+		return val, nil
+	case *IndexOperand:
+		leftVal, err := getValueFromPath(entry, path.Left)
+		if err != nil {
+			return AttributeValue{}, err
+		}
+		if leftVal.L == nil {
+			return AttributeValue{}, fmt.Errorf("operand is not a list")
+		}
+		list := *leftVal.L
+		if path.Index < 0 || path.Index >= len(list) {
+			return AttributeValue{}, fmt.Errorf("index out of range")
+		}
+		return list[path.Index], nil
+	case *DotOperand:
+		leftVal, err := getValueFromPath(entry, path.Left)
+		if err != nil {
+			return AttributeValue{}, err
+		}
+		if leftVal.M == nil {
+			return AttributeValue{}, fmt.Errorf("operand is not a map")
+		}
+		return getValueFromPath(*leftVal.M, path.Right)
+	default:
+		return AttributeValue{}, fmt.Errorf("unknown path operand type: %T", path)
 	}
 }
 

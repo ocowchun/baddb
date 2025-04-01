@@ -5,7 +5,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/smithy-go/middleware"
-	"github.com/ocowchun/baddb/ddb"
+	"github.com/ocowchun/baddb/ddb/core"
 	"io"
 	"log"
 	"strconv"
@@ -112,7 +112,7 @@ func newTableDescription(description *types.TableDescription) *tableDescription 
 }
 
 type KeysAndAttributes struct {
-	Keys                     []map[string]ddb.AttributeValue
+	Keys                     []map[string]core.AttributeValue
 	AttributesToGet          []string
 	ConsistentRead           *bool
 	ExpressionAttributeNames map[string]string
@@ -160,25 +160,25 @@ func DecodeBatchGetItemInput(reader io.ReadCloser) (*dynamodb.BatchGetItemInput,
 }
 
 type batchGetItemOutput struct {
-	Responses       map[string][]map[string]ddb.AttributeValue
+	Responses       map[string][]map[string]core.AttributeValue
 	UnprocessedKeys map[string]KeysAndAttributes
 }
 
 func EncodeBatchGetItemOutput(output *dynamodb.BatchGetItemOutput) ([]byte, error) {
-	responses := make(map[string][]map[string]ddb.AttributeValue, len(output.Responses))
+	responses := make(map[string][]map[string]core.AttributeValue, len(output.Responses))
 	for tableName, items := range output.Responses {
-		items2 := make([]map[string]ddb.AttributeValue, len(items))
+		items2 := make([]map[string]core.AttributeValue, len(items))
 		for i, item := range items {
-			items2[i] = ddb.NewEntryFromItem(item).Body
+			items2[i] = core.NewEntryFromItem(item).Body
 		}
 		responses[tableName] = items2
 	}
 
 	unprocessedKeys := make(map[string]KeysAndAttributes, len(output.UnprocessedKeys))
 	for tableName, keysAndAttributes := range output.UnprocessedKeys {
-		keys := make([]map[string]ddb.AttributeValue, len(keysAndAttributes.Keys))
+		keys := make([]map[string]core.AttributeValue, len(keysAndAttributes.Keys))
 		for i, key := range keysAndAttributes.Keys {
-			keys[i] = ddb.NewEntryFromItem(key).Body
+			keys[i] = core.NewEntryFromItem(key).Body
 		}
 		unprocessedKeys[tableName] = KeysAndAttributes{
 			Keys:                     keys,
@@ -199,10 +199,10 @@ func EncodeBatchGetItemOutput(output *dynamodb.BatchGetItemOutput) ([]byte, erro
 }
 
 type DeleteRequest struct {
-	Key map[string]ddb.AttributeValue
+	Key map[string]core.AttributeValue
 }
 type PutRequest struct {
-	Item map[string]ddb.AttributeValue
+	Item map[string]core.AttributeValue
 }
 
 type WriteRequest struct {
@@ -270,13 +270,13 @@ func EncodeBatchWriteItemOutput(output *dynamodb.BatchWriteItemOutput) ([]byte, 
 			if writeRequest.DeleteRequest != nil {
 				requests[i] = WriteRequest{
 					DeleteRequest: &DeleteRequest{
-						Key: ddb.NewEntryFromItem(writeRequest.DeleteRequest.Key).Body,
+						Key: core.NewEntryFromItem(writeRequest.DeleteRequest.Key).Body,
 					},
 				}
 			} else {
 				requests[i] = WriteRequest{
 					PutRequest: &PutRequest{
-						Item: ddb.NewEntryFromItem(writeRequest.PutRequest.Item).Body,
+						Item: core.NewEntryFromItem(writeRequest.PutRequest.Item).Body,
 					},
 				}
 			}
@@ -353,13 +353,13 @@ func EncodeCreateTableOutput(output *dynamodb.CreateTableOutput) ([]byte, error)
 }
 
 type putItemInput struct {
-	Item                                map[string]ddb.AttributeValue
+	Item                                map[string]core.AttributeValue
 	TableName                           *string
 	ConditionExpression                 *string
 	ConditionalOperator                 types.ConditionalOperator
 	Expected                            map[string]types.ExpectedAttributeValue
 	ExpressionAttributeNames            map[string]string
-	ExpressionAttributeValues           map[string]ddb.AttributeValue
+	ExpressionAttributeValues           map[string]core.AttributeValue
 	ReturnConsumedCapacity              types.ReturnConsumedCapacity
 	ReturnItemCollectionMetrics         types.ReturnItemCollectionMetrics
 	ReturnValues                        types.ReturnValue
@@ -405,13 +405,13 @@ func EncodePutItemOutput(output *dynamodb.PutItemOutput) ([]byte, error) {
 }
 
 type updateItemInput struct {
-	Key                                 map[string]ddb.AttributeValue
+	Key                                 map[string]core.AttributeValue
 	TableName                           *string
 	ConditionExpression                 *string
 	ConditionalOperator                 types.ConditionalOperator
 	Expected                            map[string]types.ExpectedAttributeValue
 	ExpressionAttributeNames            map[string]string
-	ExpressionAttributeValues           map[string]ddb.AttributeValue
+	ExpressionAttributeValues           map[string]core.AttributeValue
 	ReturnConsumedCapacity              types.ReturnConsumedCapacity
 	ReturnItemCollectionMetrics         types.ReturnItemCollectionMetrics
 	ReturnValues                        types.ReturnValue
@@ -456,7 +456,7 @@ func DecodeUpdateItemInput(reader io.ReadCloser) (*dynamodb.UpdateItemInput, err
 type updateItemOutput struct {
 	ConsumedCapacity *types.ConsumedCapacity
 
-	Attributes map[string]ddb.AttributeValue
+	Attributes map[string]core.AttributeValue
 
 	ResultMetadata middleware.Metadata
 }
@@ -464,7 +464,7 @@ type updateItemOutput struct {
 func EncodeUpdateItemOutput(output *dynamodb.UpdateItemOutput) ([]byte, error) {
 	output2 := updateItemOutput{
 		ConsumedCapacity: output.ConsumedCapacity,
-		Attributes:       ddb.NewEntryFromItem(output.Attributes).Body,
+		Attributes:       core.NewEntryFromItem(output.Attributes).Body,
 		ResultMetadata:   output.ResultMetadata,
 	}
 
@@ -473,7 +473,7 @@ func EncodeUpdateItemOutput(output *dynamodb.UpdateItemOutput) ([]byte, error) {
 }
 
 type getItemInput struct {
-	Key                      map[string]ddb.AttributeValue
+	Key                      map[string]core.AttributeValue
 	TableName                *string
 	AttributesToGet          []string
 	ConsistentRead           *bool
@@ -513,7 +513,7 @@ func DecodeGetItemInput(reader io.ReadCloser) (*dynamodb.GetItemInput, error) {
 type getItemOutput struct {
 	ConsumedCapacity *types.ConsumedCapacity
 
-	Item map[string]ddb.AttributeValue
+	Item map[string]core.AttributeValue
 
 	ResultMetadata middleware.Metadata
 }
@@ -521,7 +521,7 @@ type getItemOutput struct {
 func EncodeGetItemOutput(output *dynamodb.GetItemOutput) ([]byte, error) {
 	output2 := getItemOutput{
 		ConsumedCapacity: output.ConsumedCapacity,
-		Item:             ddb.NewEntryFromItem(output.Item).Body,
+		Item:             core.NewEntryFromItem(output.Item).Body,
 		ResultMetadata:   output.ResultMetadata,
 	}
 	bs, err := json.Marshal(output2)
@@ -531,9 +531,9 @@ func EncodeGetItemOutput(output *dynamodb.GetItemOutput) ([]byte, error) {
 type queryInput struct {
 	TableName                 *string
 	ConsistentRead            *bool
-	ExclusiveStartKey         map[string]ddb.AttributeValue
+	ExclusiveStartKey         map[string]core.AttributeValue
 	ExpressionAttributeNames  map[string]string
-	ExpressionAttributeValues map[string]ddb.AttributeValue
+	ExpressionAttributeValues map[string]core.AttributeValue
 	FilterExpression          *string
 	Limit                     *int32
 	IndexName                 *string
@@ -575,28 +575,28 @@ func DecodeQueryInput(reader io.ReadCloser) (*dynamodb.QueryInput, error) {
 type queryOutput struct {
 	//ConsumedCapacity *types.ConsumedCapacity
 	Count            int32
-	Items            []map[string]ddb.AttributeValue
-	LastEvaluatedKey map[string]ddb.AttributeValue
+	Items            []map[string]core.AttributeValue
+	LastEvaluatedKey map[string]core.AttributeValue
 	ScannedCount     int32
 	//ResultMetadata   middleware.Metadata
 }
 
 func EncodeQueryOutput(output *dynamodb.QueryOutput) ([]byte, error) {
-	items := make([]map[string]ddb.AttributeValue, len(output.Items))
+	items := make([]map[string]core.AttributeValue, len(output.Items))
 	for i, item := range output.Items {
-		items[i] = ddb.NewEntryFromItem(item).Body
+		items[i] = core.NewEntryFromItem(item).Body
 	}
 
 	output2 := queryOutput{
 		Count:            output.Count,
 		Items:            items,
-		LastEvaluatedKey: ddb.NewEntryFromItem(output.LastEvaluatedKey).Body,
+		LastEvaluatedKey: core.NewEntryFromItem(output.LastEvaluatedKey).Body,
 	}
 	bs, err := json.Marshal(output2)
 	return bs, err
 }
 
-func transformToDdbMap(m map[string]ddb.AttributeValue) map[string]types.AttributeValue {
+func transformToDdbMap(m map[string]core.AttributeValue) map[string]types.AttributeValue {
 	result := map[string]types.AttributeValue{}
 	for key, attribute := range m {
 		result[key] = attribute.ToDdbAttributeValue()
@@ -675,11 +675,11 @@ func EncodeDescribeTableOutput(output *dynamodb.DescribeTableOutput) ([]byte, er
 }
 
 type deleteItemInput struct {
-	Key                       map[string]ddb.AttributeValue
+	Key                       map[string]core.AttributeValue
 	TableName                 *string
 	ConditionExpression       *string
 	ExpressionAttributeNames  map[string]string
-	ExpressionAttributeValues map[string]ddb.AttributeValue
+	ExpressionAttributeValues map[string]core.AttributeValue
 }
 
 func DecodeDeleteItemInput(reader io.ReadCloser) (*dynamodb.DeleteItemInput, error) {
@@ -708,12 +708,12 @@ func DecodeDeleteItemInput(reader io.ReadCloser) (*dynamodb.DeleteItemInput, err
 }
 
 type deleteItemOutput struct {
-	Attributes map[string]ddb.AttributeValue
+	Attributes map[string]core.AttributeValue
 }
 
 func EncodeDeleteItemOutput(output *dynamodb.DeleteItemOutput) ([]byte, error) {
 	output2 := deleteItemOutput{
-		Attributes: ddb.NewEntryFromItem(output.Attributes).Body,
+		Attributes: core.NewEntryFromItem(output.Attributes).Body,
 	}
 
 	bs, err := json.Marshal(output2)
@@ -722,36 +722,36 @@ func EncodeDeleteItemOutput(output *dynamodb.DeleteItemOutput) ([]byte, error) {
 
 type ConditionCheck struct {
 	ConditionExpression                 *string
-	Key                                 map[string]ddb.AttributeValue
+	Key                                 map[string]core.AttributeValue
 	TableName                           *string
 	ExpressionAttributeNames            map[string]string
-	ExpressionAttributeValues           map[string]ddb.AttributeValue
+	ExpressionAttributeValues           map[string]core.AttributeValue
 	ReturnValuesOnConditionCheckFailure types.ReturnValuesOnConditionCheckFailure
 }
 type Delete struct {
-	Key                                 map[string]ddb.AttributeValue
+	Key                                 map[string]core.AttributeValue
 	TableName                           *string
 	ConditionExpression                 *string
 	ExpressionAttributeNames            map[string]string
-	ExpressionAttributeValues           map[string]ddb.AttributeValue
+	ExpressionAttributeValues           map[string]core.AttributeValue
 	ReturnValuesOnConditionCheckFailure types.ReturnValuesOnConditionCheckFailure
 }
 type Put struct {
-	Item                                map[string]ddb.AttributeValue
+	Item                                map[string]core.AttributeValue
 	TableName                           *string
 	ConditionExpression                 *string
 	ExpressionAttributeNames            map[string]string
-	ExpressionAttributeValues           map[string]ddb.AttributeValue
+	ExpressionAttributeValues           map[string]core.AttributeValue
 	ReturnValuesOnConditionCheckFailure types.ReturnValuesOnConditionCheckFailure
 }
 
 type Update struct {
-	Key                                 map[string]ddb.AttributeValue
+	Key                                 map[string]core.AttributeValue
 	TableName                           *string
 	UpdateExpression                    *string
 	ConditionExpression                 *string
 	ExpressionAttributeNames            map[string]string
-	ExpressionAttributeValues           map[string]ddb.AttributeValue
+	ExpressionAttributeValues           map[string]core.AttributeValue
 	ReturnValuesOnConditionCheckFailure types.ReturnValuesOnConditionCheckFailure
 }
 type TransactWriteItem struct {

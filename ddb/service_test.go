@@ -2,6 +2,7 @@ package ddb
 
 import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/ocowchun/baddb/ddb/core"
 	"testing"
 )
 
@@ -15,7 +16,7 @@ func TestEncoding(t *testing.T) {
 	ramens["shoyu"] = &types.AttributeValueMemberS{Value: "Shigure"}
 	m["ramens"] = &types.AttributeValueMemberM{Value: ramens}
 
-	entry := NewEntryFromItem(m)
+	entry := core.NewEntryFromItem(m)
 
 	if *entry.Body["hashKey"].S != "hashKey1" {
 		t.Fatalf("hashKey is not equal, expected :%s, got %s", "hashKey1", *entry.Body["hashKey"].S)
@@ -30,7 +31,7 @@ func TestEncoding(t *testing.T) {
 		t.Fatalf("ramens is not equal!")
 	}
 
-	_, err := EncodingAttributeValue(entry.Body)
+	_, err := core.EncodingAttributeValue(entry.Body)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,6 +2,7 @@ package ddb
 
 import (
 	"fmt"
+	"github.com/ocowchun/baddb/ddb/core"
 	"github.com/ocowchun/baddb/expression"
 	"github.com/ocowchun/baddb/expression/ast"
 	"strconv"
@@ -11,13 +12,13 @@ import (
 type ConditionBuilder struct {
 	conditionExpression       ast.ConditionExpression
 	expressionAttributeNames  map[string]string
-	expressionAttributeValues map[string]AttributeValue
+	expressionAttributeValues map[string]core.AttributeValue
 }
 
 func BuildCondition(
 	conditionExpressionContent string,
 	expressionAttributeNames map[string]string,
-	expressionAttributeValues map[string]AttributeValue,
+	expressionAttributeValues map[string]core.AttributeValue,
 ) (*Condition, error) {
 	conditionExpression, err := expression.ParseConditionExpression(conditionExpressionContent)
 	if err != nil {
@@ -34,10 +35,10 @@ func BuildCondition(
 }
 
 type Condition struct {
-	f func(entry *Entry) (bool, error)
+	f func(entry *core.Entry) (bool, error)
 }
 
-func (c *Condition) Check(entry *Entry) (bool, error) {
+func (c *Condition) Check(entry *core.Entry) (bool, error) {
 	return c.f(entry)
 }
 
@@ -45,52 +46,24 @@ type Operand interface {
 	operand()
 }
 
-type PathOperand interface {
-	operand()
-	pathOperand()
-	String() string
+type PathOperand struct {
+	inner core.PathOperand
 }
 
-type AttributeNameOperand struct {
-	Name string
+func (p *PathOperand) operand() {
 }
-
-func (a *AttributeNameOperand) operand()     {}
-func (a *AttributeNameOperand) pathOperand() {}
-func (a *AttributeNameOperand) String() string {
-	return a.Name
-}
-
-type IndexOperand struct {
-	Left  PathOperand
-	Index int
-}
-
-func (i *IndexOperand) operand()     {}
-func (i *IndexOperand) pathOperand() {}
-func (i *IndexOperand) String() string {
-	return fmt.Sprintf("%s[%d]", i.Left, i.Index)
-}
-
-type DotOperand struct {
-	Left  PathOperand
-	Right PathOperand
-}
-
-func (d *DotOperand) operand()     {}
-func (d *DotOperand) pathOperand() {}
-func (d *DotOperand) String() string {
-	return fmt.Sprintf("%s.%s", d.Left, d.Right)
+func (p *PathOperand) String() string {
+	return p.inner.String()
 }
 
 type AttributeValueOperand struct {
-	Value AttributeValue
+	Value core.AttributeValue
 }
 
 func (a AttributeValueOperand) operand() {}
 
 type SizeOperand struct {
-	Path PathOperand
+	Path *PathOperand
 }
 
 func (s *SizeOperand) operand()     {}
@@ -130,7 +103,7 @@ func (b *ConditionBuilder) buildOperand(operand ast.Operand) (Operand, error) {
 
 }
 
-func (b *ConditionBuilder) buildPath(operand ast.Operand) (PathOperand, error) {
+func (b *ConditionBuilder) buildPath(operand ast.Operand) (*PathOperand, error) {
 	// it's ok to have condition like name = "ben", but is it also ok to have name = lastName?
 	switch operand := operand.(type) {
 	case *ast.AttributeNameOperand:
@@ -141,15 +114,19 @@ func (b *ConditionBuilder) buildPath(operand ast.Operand) (PathOperand, error) {
 				msg := fmt.Sprintf("An expression attribute name used in the document path is not defined; attribute name: %s", key)
 				return nil, fmt.Errorf(msg)
 			}
-			return &AttributeNameOperand{
-				Name: name,
+			return &PathOperand{
+				inner: &core.AttributeNameOperand{
+					Name: name,
+				},
 			}, nil
 		} else if operand.HasColon {
 			return nil, fmt.Errorf("path contains attribute value: %s", operand.Identifier.TokenLiteral())
 		} else {
 			name := operand.Identifier.TokenLiteral()
-			return &AttributeNameOperand{
-				Name: name,
+			return &PathOperand{
+				inner: &core.AttributeNameOperand{
+					Name: name,
+				},
 			}, nil
 		}
 	case *ast.IndexOperand:
@@ -158,9 +135,11 @@ func (b *ConditionBuilder) buildPath(operand ast.Operand) (PathOperand, error) {
 			return nil, err
 		}
 
-		return &IndexOperand{
-			Left:  left,
-			Index: operand.Index,
+		return &PathOperand{
+			inner: &core.IndexOperand{
+				Left:  left.inner,
+				Index: operand.Index,
+			},
 		}, nil
 
 	case *ast.DotOperand:
@@ -172,9 +151,11 @@ func (b *ConditionBuilder) buildPath(operand ast.Operand) (PathOperand, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &DotOperand{
-			Left:  left,
-			Right: right,
+		return &PathOperand{
+			inner: &core.DotOperand{
+				Left:  left.inner,
+				Right: right.inner,
+			},
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown operand type: %T", operand)
@@ -212,7 +193,7 @@ func (b *ConditionBuilder) BuildNotCondition(exp *ast.NotConditionExpression) (*
 		return nil, err
 	}
 
-	f := func(entry *Entry) (bool, error) {
+	f := func(entry *core.Entry) (bool, error) {
 		result, err := condition.Check(entry)
 		if err != nil {
 			return false, err
@@ -236,7 +217,7 @@ func (b *ConditionBuilder) BuildOrCondition(exp *ast.OrConditionExpression) (*Co
 		return nil, err
 	}
 
-	f := func(entry *Entry) (bool, error) {
+	f := func(entry *core.Entry) (bool, error) {
 		leftResult, err := left.Check(entry)
 		if err != nil {
 			return false, err
@@ -266,7 +247,7 @@ func (b *ConditionBuilder) BuildAndCondition(exp *ast.AndConditionExpression) (*
 		return nil, err
 	}
 
-	f := func(entry *Entry) (bool, error) {
+	f := func(entry *core.Entry) (bool, error) {
 		leftResult, err := left.Check(entry)
 		if err != nil {
 			return false, err
@@ -312,7 +293,7 @@ func (b *ConditionBuilder) BuildContainsFunction(exp *ast.ContainsFunctionExpres
 		return nil, err
 	}
 
-	f := func(entry *Entry) (bool, error) {
+	f := func(entry *core.Entry) (bool, error) {
 		leftVal, err := getValue(entry, leftOperand)
 		if err != nil {
 			return false, err
@@ -369,7 +350,7 @@ func (b *ConditionBuilder) BuildBeginsWithFunction(exp *ast.BeginsWithFunctionEx
 		return nil, err
 	}
 
-	f := func(entry *Entry) (bool, error) {
+	f := func(entry *core.Entry) (bool, error) {
 		leftVal, err := getValue(entry, leftOperand)
 		if err != nil {
 			return false, err
@@ -397,7 +378,7 @@ func (b *ConditionBuilder) BuildAttributeTypeFunction(exp *ast.AttributeTypeFunc
 		return nil, err
 	}
 
-	f := func(entry *Entry) (bool, error) {
+	f := func(entry *core.Entry) (bool, error) {
 		val, err := getValue(entry, operand)
 		if err != nil {
 			return false, err
@@ -417,7 +398,7 @@ func (b *ConditionBuilder) BuildAttributeNotExistsFunction(exp *ast.AttributeNot
 		return nil, err
 	}
 
-	f := func(entry *Entry) (bool, error) {
+	f := func(entry *core.Entry) (bool, error) {
 		_, err := getValue(entry, operand)
 		if err != nil {
 			return true, nil
@@ -435,7 +416,7 @@ func (b *ConditionBuilder) BuildAttributeExistsFunction(exp *ast.AttributeExists
 		return nil, err
 	}
 
-	f := func(entry *Entry) (bool, error) {
+	f := func(entry *core.Entry) (bool, error) {
 		_, err := getValue(entry, operand)
 		if err != nil {
 			return false, nil
@@ -464,7 +445,7 @@ func (b *ConditionBuilder) BuildInCondition(exp *ast.InConditionExpression) (*Co
 		rightOperands[i] = operand
 	}
 
-	f := func(entry *Entry) (bool, error) {
+	f := func(entry *core.Entry) (bool, error) {
 		leftVal, err := getValue(entry, leftOperand)
 		if err != nil {
 			return false, err
@@ -504,7 +485,7 @@ func (b *ConditionBuilder) BuildBetweenCondition(exp *ast.BetweenConditionExpres
 		return nil, err
 	}
 
-	f := func(entry *Entry) (bool, error) {
+	f := func(entry *core.Entry) (bool, error) {
 		leftVal, err := getValue(entry, leftOperand)
 		if err != nil {
 			return false, err
@@ -543,7 +524,7 @@ func (b *ConditionBuilder) BuildComparatorCondition(exp *ast.ComparatorCondition
 		return nil, err
 	}
 
-	f := func(entry *Entry) (bool, error) {
+	f := func(entry *core.Entry) (bool, error) {
 		leftVal, err := getValue(entry, leftOperand)
 		if err != nil {
 			return false, err
@@ -560,7 +541,7 @@ func (b *ConditionBuilder) BuildComparatorCondition(exp *ast.ComparatorCondition
 	}, nil
 }
 
-func compareValue(leftVal AttributeValue, rightVal AttributeValue, operator string) (bool, error) {
+func compareValue(leftVal core.AttributeValue, rightVal core.AttributeValue, operator string) (bool, error) {
 	compared, err := leftVal.Compare(rightVal)
 	if err != nil {
 		return false, err
@@ -582,76 +563,40 @@ func compareValue(leftVal AttributeValue, rightVal AttributeValue, operator stri
 	}
 }
 
-func getValue(entry *Entry, operand Operand) (AttributeValue, error) {
+func getValue(entry *core.Entry, operand Operand) (core.AttributeValue, error) {
 	switch left := operand.(type) {
-	case PathOperand:
-		return getValueFromPath(entry.Body, left)
+	case *PathOperand:
+		return entry.Get(left.inner)
 	case *AttributeValueOperand:
 		return left.Value, nil
 	case *SizeOperand:
-		val, err := getValueFromPath(entry.Body, left.Path)
+		val, err := entry.Get(left.Path.inner)
 		if err != nil {
-			return AttributeValue{}, err
+			return core.AttributeValue{}, err
 		}
 
 		if val.S != nil {
 			l := strconv.Itoa(len(*val.S))
-			return AttributeValue{N: &l}, nil
+			return core.AttributeValue{N: &l}, nil
 		} else if val.B != nil {
 			l := strconv.Itoa(len(*val.B))
-			return AttributeValue{N: &l}, nil
+			return core.AttributeValue{N: &l}, nil
 		} else if val.NS != nil {
 			l := strconv.Itoa(len(*val.NS))
-			return AttributeValue{N: &l}, nil
+			return core.AttributeValue{N: &l}, nil
 		} else if val.SS != nil {
 			l := strconv.Itoa(len(*val.SS))
-			return AttributeValue{N: &l}, nil
+			return core.AttributeValue{N: &l}, nil
 		} else if val.L != nil {
 			l := strconv.Itoa(len(*val.L))
-			return AttributeValue{N: &l}, nil
+			return core.AttributeValue{N: &l}, nil
 		} else if val.M != nil {
 			l := strconv.Itoa(len(*val.M))
-			return AttributeValue{N: &l}, nil
+			return core.AttributeValue{N: &l}, nil
 		} else {
-			return AttributeValue{}, fmt.Errorf("The conditional request failed")
+			return core.AttributeValue{}, fmt.Errorf("The conditional request failed")
 		}
 	default:
-		return AttributeValue{}, fmt.Errorf("unknown operand type: %T", left)
-	}
-}
-
-func getValueFromPath(entry map[string]AttributeValue, path PathOperand) (AttributeValue, error) {
-	switch path := path.(type) {
-	case *AttributeNameOperand:
-		key := path.Name
-		val, ok := entry[key]
-		if !ok {
-			return AttributeValue{}, fmt.Errorf("key %s not found", key)
-		}
-		return val, nil
-	case *IndexOperand:
-		leftVal, err := getValueFromPath(entry, path.Left)
-		if err != nil {
-			return AttributeValue{}, err
-		}
-		if leftVal.L == nil {
-			return AttributeValue{}, fmt.Errorf("operand is not a list")
-		}
-		list := *leftVal.L
-		if path.Index < 0 || path.Index >= len(list) {
-			return AttributeValue{}, fmt.Errorf("index out of range")
-		}
-		return list[path.Index], nil
-	case *DotOperand:
-		leftVal, err := getValueFromPath(entry, path.Left)
-		if err != nil {
-			return AttributeValue{}, err
-		}
-		if leftVal.M == nil {
-			return AttributeValue{}, fmt.Errorf("operand is not a map")
-		}
-		return getValueFromPath(*leftVal.M, path.Right)
-	default:
-		return AttributeValue{}, fmt.Errorf("unknown path operand type: %T", path)
+		return core.AttributeValue{}, fmt.Errorf("unknown operand type: %T", left)
 	}
 }

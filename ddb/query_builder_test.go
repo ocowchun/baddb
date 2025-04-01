@@ -3,6 +3,7 @@ package ddb
 import (
 	"bytes"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/ocowchun/baddb/ddb/core"
 	"github.com/ocowchun/baddb/expression"
 	"testing"
 )
@@ -16,7 +17,7 @@ func TestSimplePredicateExpression(t *testing.T) {
 
 	builder := &QueryBuilder{
 		KeyConditionExpression: keyConditionExpression,
-		ExpressionAttributeValues: map[string]AttributeValue{
+		ExpressionAttributeValues: map[string]core.AttributeValue{
 			":year": {
 				N: aws.String("2025"),
 			},
@@ -83,23 +84,23 @@ func TestSimplePredicateExpression_With_SortKey(t *testing.T) {
 		},
 	}
 
-	entries := []*Entry{
+	entries := []*core.Entry{
 		{
-			Body: map[string]AttributeValue{
+			Body: map[string]core.AttributeValue{
 				"title": {
 					S: aws.String("Star Wars 4"),
 				},
 			},
 		},
 		{
-			Body: map[string]AttributeValue{
+			Body: map[string]core.AttributeValue{
 				"title": {
 					S: aws.String("Star Wars 5"),
 				},
 			},
 		},
 		{
-			Body: map[string]AttributeValue{
+			Body: map[string]core.AttributeValue{
 				"title": {
 					S: aws.String("Star Wars 6"),
 				},
@@ -113,7 +114,7 @@ func TestSimplePredicateExpression_With_SortKey(t *testing.T) {
 			t.Fatalf("expect no error, got %v", err)
 		}
 
-		expressionAttributeValues := map[string]AttributeValue{
+		expressionAttributeValues := map[string]core.AttributeValue{
 			":year": {
 				N: aws.String("1977"),
 			},
@@ -122,7 +123,7 @@ func TestSimplePredicateExpression_With_SortKey(t *testing.T) {
 			},
 		}
 		if testCase.rightTitle != "" {
-			expressionAttributeValues[":rightTitle"] = AttributeValue{
+			expressionAttributeValues[":rightTitle"] = core.AttributeValue{
 				S: aws.String(testCase.rightTitle),
 			}
 		}
@@ -173,7 +174,7 @@ func TestSimplePredicateExpression_With_GSI(t *testing.T) {
 	indexName := "regionCode-index"
 	builder := &QueryBuilder{
 		KeyConditionExpression: keyConditionExpression,
-		ExpressionAttributeValues: map[string]AttributeValue{
+		ExpressionAttributeValues: map[string]core.AttributeValue{
 			":regionCode": {
 				S: aws.String("9527"),
 			},

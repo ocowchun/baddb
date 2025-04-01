@@ -1,128 +1,32 @@
 package ddb
 
 import (
-	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/ocowchun/baddb/ddb/core"
 	"golang.org/x/time/rate"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-type PrimaryKey struct {
-	PartitionKey []byte
-	SortKey      []byte
-}
-
-func (k *PrimaryKey) Bytes() []byte {
-	bs := make([]byte, 0)
-	bs = append(bs, k.PartitionKey...)
-
-	//	// TODO: need a better way to generate primary key, current approach will failed for below case
-	//	// pk: ab, sk: |cd and pk: ab|, sk: cd
-	if len(k.SortKey) > 0 {
-		bs = append(bs, []byte("|")...)
-		bs = append(bs, k.SortKey...)
-	}
-
-	return bs
-}
-
-func (k *PrimaryKey) String() string {
-	var out bytes.Buffer
-	out.WriteString(fmt.Sprintf("(PartitionKey: '%s'", string(k.PartitionKey)))
-	if len(k.SortKey) > 0 {
-		out.WriteString(fmt.Sprintf(", SortKey: '%s'", string(k.SortKey)))
-	}
-	out.WriteString(")")
-	return out.String()
-}
-
 type QueryResponse struct {
-	Entries      []*Entry
+	Entries      []*core.Entry
 	ScannedCount int32
 }
 
 type EntryWithKey struct {
 	Key   []byte
-	Entry *Entry
+	Entry *core.Entry
 }
 
 type EntryWrapper struct {
-	Entry     *Entry
+	Entry     *core.Entry
 	IsDeleted bool
 	CreatedAt time.Time
-}
-
-type Tuple struct {
-	Entries []EntryWrapper
-}
-
-// return prevEntry, found
-func (t *Tuple) prevEntry() *Entry {
-	if len(t.Entries) < 2 {
-		return nil
-	} else {
-		prevEntry := t.Entries[0]
-		if prevEntry.IsDeleted {
-			return nil
-		}
-		return prevEntry.Entry
-	}
-}
-
-func (t *Tuple) getEntry(consistentRead bool, readTs time.Time) *Entry {
-	if len(t.Entries) == 2 {
-		if consistentRead || t.Entries[1].CreatedAt.Before(readTs) {
-			if t.Entries[1].IsDeleted {
-				return nil
-			}
-			return t.Entries[1].Entry
-		} else {
-			if t.Entries[0].IsDeleted {
-				return nil
-			}
-			return t.Entries[0].Entry
-		}
-	} else if len(t.Entries) == 1 {
-		if consistentRead || t.Entries[0].CreatedAt.Before(readTs) {
-			if t.Entries[0].IsDeleted {
-				return nil
-			}
-			return t.Entries[0].Entry
-		} else {
-			return nil
-		}
-	} else {
-		// no entry
-		return nil
-	}
-}
-
-// return lastEntry, found
-func (t *Tuple) currentEntry() *Entry {
-	if len(t.Entries) == 0 {
-		return nil
-	} else {
-		lastEntry := t.Entries[len(t.Entries)-1]
-		if lastEntry.IsDeleted {
-			return nil
-		}
-		return lastEntry.Entry
-	}
-}
-
-// addEntry only keep last 2 Entries
-func (t *Tuple) addEntry(entryWrapper *EntryWrapper) {
-
-	t.Entries = append(t.Entries, *entryWrapper)
-	if len(t.Entries) > 2 {
-		t.Entries = t.Entries[1:]
-	}
 }
 
 type InnerStorage struct {
@@ -329,7 +233,7 @@ func (s *InnerStorage) BeginTxn(readOnly bool) (*Txn, error) {
 }
 
 type PutRequest struct {
-	Entry     *Entry
+	Entry     *core.Entry
 	TableName string
 	Condition *Condition
 }
@@ -351,7 +255,7 @@ func (s *InnerStorage) Put(req *PutRequest) error {
 }
 
 type UpdateRequest struct {
-	Key             *Entry
+	Key             *core.Entry
 	UpdateOperation *UpdateOperation
 	TableName       string
 	Condition       *Condition
@@ -374,8 +278,8 @@ func (s *InnerStorage) Update(req *UpdateRequest) (*UpdateResponse, error) {
 }
 
 type UpdateResponse struct {
-	OldEntry *Entry
-	NewEntry *Entry
+	OldEntry *core.Entry
+	NewEntry *core.Entry
 }
 
 func (s *InnerStorage) UpdateWithTransaction(req *UpdateRequest, txn *Txn) (*UpdateResponse, error) {
@@ -400,8 +304,8 @@ func (s *InnerStorage) UpdateWithTransaction(req *UpdateRequest, txn *Txn) (*Upd
 	}
 
 	if entry == nil {
-		entry = &Entry{
-			Body: make(map[string]AttributeValue),
+		entry = &core.Entry{
+			Body: make(map[string]core.AttributeValue),
 		}
 	}
 	oldEntry := entry.Clone()
@@ -444,7 +348,7 @@ func (s *InnerStorage) UpdateWithTransaction(req *UpdateRequest, txn *Txn) (*Upd
 }
 
 type DeleteRequest struct {
-	Entry     *Entry
+	Entry     *core.Entry
 	TableName string
 	Condition *Condition
 }
@@ -532,7 +436,7 @@ func (s *InnerStorage) put(entry *EntryWrapper, table *InnerTableMetadata, condi
 
 	if tuple == nil {
 		if condition != nil {
-			matched, err := condition.Check(&Entry{Body: make(map[string]AttributeValue)})
+			matched, err := condition.Check(&core.Entry{Body: make(map[string]core.AttributeValue)})
 
 			// improve error handling
 			if err != nil || !matched {
@@ -567,7 +471,7 @@ func (s *InnerStorage) put(entry *EntryWrapper, table *InnerTableMetadata, condi
 		if condition != nil {
 			currentEntry := tuple.currentEntry()
 			if currentEntry == nil {
-				currentEntry = &Entry{Body: make(map[string]AttributeValue)}
+				currentEntry = &core.Entry{Body: make(map[string]core.AttributeValue)}
 			}
 			matched, err := condition.Check(currentEntry)
 			// improve error handling
@@ -600,7 +504,7 @@ func (s *InnerStorage) put(entry *EntryWrapper, table *InnerTableMetadata, condi
 	return nil
 }
 
-func (s *InnerStorage) buildTablePrimaryKey(entry *Entry, table *InnerTableMetadata) (*PrimaryKey, error) {
+func (s *InnerStorage) buildTablePrimaryKey(entry *core.Entry, table *InnerTableMetadata) (*PrimaryKey, error) {
 	primaryKey := &PrimaryKey{
 		PartitionKey: make([]byte, 0),
 		SortKey:      make([]byte, 0),
@@ -719,8 +623,8 @@ func (s *InnerStorage) syncGlobalSecondaryIndices(primaryKey *PrimaryKey, entry 
 }
 
 func (s *InnerStorage) newGsiEntry(entry *EntryWrapper, gsi InnerTableGlobalSecondaryIndexSetting, table *InnerTableMetadata) *EntryWrapper {
-	gsiEntry := &Entry{
-		Body: make(map[string]AttributeValue),
+	gsiEntry := &core.Entry{
+		Body: make(map[string]core.AttributeValue),
 	}
 
 	tablePartitionKeyName := table.PartitionKeySchema.AttributeName
@@ -756,12 +660,12 @@ func (s *InnerStorage) newGsiEntry(entry *EntryWrapper, gsi InnerTableGlobalSeco
 }
 
 type GetRequest struct {
-	Entry          *Entry
+	Entry          *core.Entry
 	ConsistentRead bool
 	TableName      string
 }
 
-func (s *InnerStorage) Get(req *GetRequest) (*Entry, error) {
+func (s *InnerStorage) Get(req *GetRequest) (*core.Entry, error) {
 	txn, err := s.BeginTxn(true)
 	if err != nil {
 		return nil, err
@@ -776,7 +680,7 @@ func (s *InnerStorage) Get(req *GetRequest) (*Entry, error) {
 	return entry, txn.Commit()
 }
 
-func (s *InnerStorage) GetWithTransaction(req *GetRequest, txn *Txn) (*Entry, error) {
+func (s *InnerStorage) GetWithTransaction(req *GetRequest, txn *Txn) (*core.Entry, error) {
 	tableMetadata, ok := s.TableMetaDatas[req.TableName]
 	if !ok {
 		return nil, fmt.Errorf("table %s not found", req.TableName)
@@ -872,7 +776,7 @@ func (s *InnerStorage) Query(req *Query) (*QueryResponse, error) {
 	}
 	defer rows.Close()
 
-	var results []*Entry
+	var results []*core.Entry
 	scannedCount := 0
 	readTs := s.readTs()
 	for rows.Next() {

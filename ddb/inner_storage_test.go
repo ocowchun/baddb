@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/ocowchun/baddb/ddb/core"
 	"testing"
 )
 
@@ -103,20 +104,20 @@ func TestInnerStorageQueryWithGsiProjections(t *testing.T) {
 		storage := createTestInnerStorageWithGSI(gsiSettings)
 
 		// Insert entry
-		body := make(map[string]AttributeValue)
+		body := make(map[string]core.AttributeValue)
 		partitionKey := "foo"
-		body["partitionKey"] = AttributeValue{S: &partitionKey}
+		body["partitionKey"] = core.AttributeValue{S: &partitionKey}
 		sortKey := "bar"
-		body["sortKey"] = AttributeValue{S: &sortKey}
+		body["sortKey"] = core.AttributeValue{S: &sortKey}
 		gsiPartitionKey := "gsiFoo"
-		body["gsi1PartitionKey"] = AttributeValue{S: &gsiPartitionKey}
+		body["gsi1PartitionKey"] = core.AttributeValue{S: &gsiPartitionKey}
 		gsiSortKey := "gsiBar"
-		body["gsi1SortKey"] = AttributeValue{S: &gsiSortKey}
+		body["gsi1SortKey"] = core.AttributeValue{S: &gsiSortKey}
 		message := "hola"
-		body["message"] = AttributeValue{S: &message}
+		body["message"] = core.AttributeValue{S: &message}
 		version := "1"
-		body["version"] = AttributeValue{N: &version}
-		entry := &Entry{
+		body["version"] = core.AttributeValue{N: &version}
+		entry := &core.Entry{
 			Body: body,
 		}
 
@@ -147,8 +148,8 @@ func TestInnerStorageQueryWithGsiProjections(t *testing.T) {
 			if len(entries) != 1 {
 				t.Fatalf("Query failed: expected 1 entry but got %d", len(entries))
 			}
-			expectedEntry := &Entry{
-				Body: make(map[string]AttributeValue),
+			expectedEntry := &core.Entry{
+				Body: make(map[string]core.AttributeValue),
 			}
 			for _, attributeName := range testCase.attributeNames {
 				expectedEntry.Body[attributeName] = entry.Body[attributeName]
@@ -161,14 +162,14 @@ func TestInnerStorageQueryWithGsiProjections(t *testing.T) {
 
 func TestInnerStoragePutGetAndDelete(t *testing.T) {
 	storage := createTestInnerStorageWithGSI([]GlobalSecondaryIndexSetting{})
-	body := make(map[string]AttributeValue)
+	body := make(map[string]core.AttributeValue)
 	partitionKey := "foo"
-	body["partitionKey"] = AttributeValue{S: &partitionKey}
+	body["partitionKey"] = core.AttributeValue{S: &partitionKey}
 	sortKey := "bar"
-	body["sortKey"] = AttributeValue{S: &sortKey}
+	body["sortKey"] = core.AttributeValue{S: &sortKey}
 	version := "1"
-	body["version"] = AttributeValue{N: &version}
-	entry := &Entry{
+	body["version"] = core.AttributeValue{N: &version}
+	entry := &core.Entry{
 		Body: body,
 	}
 	tableName := "test"
@@ -203,12 +204,12 @@ func TestInnerStoragePutGetAndDelete(t *testing.T) {
 	}
 	assertEntry(entry3, nil, t)
 
-	bodyV2 := make(map[string]AttributeValue)
-	bodyV2["partitionKey"] = AttributeValue{S: &partitionKey}
-	bodyV2["sortKey"] = AttributeValue{S: &sortKey}
+	bodyV2 := make(map[string]core.AttributeValue)
+	bodyV2["partitionKey"] = core.AttributeValue{S: &partitionKey}
+	bodyV2["sortKey"] = core.AttributeValue{S: &sortKey}
 	versionV2 := "2"
-	bodyV2["version"] = AttributeValue{N: &versionV2}
-	entryV2 := &Entry{
+	bodyV2["version"] = core.AttributeValue{N: &versionV2}
+	entryV2 := &core.Entry{
 		Body: bodyV2,
 	}
 
@@ -242,11 +243,11 @@ func TestInnerStoragePutGetAndDelete(t *testing.T) {
 	}
 	assertEntry(entry5, entry, t)
 
-	bodyV3 := make(map[string]AttributeValue)
-	bodyV3["partitionKey"] = AttributeValue{S: &partitionKey}
-	bodyV3["sortKey"] = AttributeValue{S: &sortKey}
+	bodyV3 := make(map[string]core.AttributeValue)
+	bodyV3["partitionKey"] = core.AttributeValue{S: &partitionKey}
+	bodyV3["sortKey"] = core.AttributeValue{S: &sortKey}
 	deleteReq := &DeleteRequest{
-		Entry: &Entry{
+		Entry: &core.Entry{
 			Body: bodyV3,
 		},
 		TableName: tableName,
@@ -287,14 +288,14 @@ func TestInnerStorageReadLimitReached(t *testing.T) {
 		BILLING_MODE_PROVISIONED,
 		[]GlobalSecondaryIndexSetting{},
 	)
-	body := make(map[string]AttributeValue)
+	body := make(map[string]core.AttributeValue)
 	partitionKey := "foo"
-	body["partitionKey"] = AttributeValue{S: &partitionKey}
+	body["partitionKey"] = core.AttributeValue{S: &partitionKey}
 	sortKey := "bar"
-	body["sortKey"] = AttributeValue{S: &sortKey}
+	body["sortKey"] = core.AttributeValue{S: &sortKey}
 	version := "1"
-	body["version"] = AttributeValue{N: &version}
-	entry := &Entry{
+	body["version"] = core.AttributeValue{N: &version}
+	entry := &core.Entry{
 		Body: body,
 	}
 	tableName := "test"
@@ -335,14 +336,14 @@ func TestInnerStorageWriteLimitReached(t *testing.T) {
 		BILLING_MODE_PROVISIONED,
 		[]GlobalSecondaryIndexSetting{},
 	)
-	body := make(map[string]AttributeValue)
+	body := make(map[string]core.AttributeValue)
 	partitionKey := "foo"
-	body["partitionKey"] = AttributeValue{S: &partitionKey}
+	body["partitionKey"] = core.AttributeValue{S: &partitionKey}
 	sortKey := "bar"
-	body["sortKey"] = AttributeValue{S: &sortKey}
+	body["sortKey"] = core.AttributeValue{S: &sortKey}
 	version := "1"
-	body["version"] = AttributeValue{N: &version}
-	entry := &Entry{
+	body["version"] = core.AttributeValue{N: &version}
+	entry := &core.Entry{
 		Body: body,
 	}
 
@@ -366,7 +367,7 @@ func TestInnerStorageWriteLimitReached(t *testing.T) {
 	}
 }
 
-func assertEntry(actual *Entry, expected *Entry, t *testing.T) {
+func assertEntry(actual *core.Entry, expected *core.Entry, t *testing.T) {
 	t.Helper()
 	if actual == nil && expected == nil {
 		return
@@ -396,16 +397,16 @@ func TestInnerStorageQuery(t *testing.T) {
 	storage := createTestInnerStorageWithGSI([]GlobalSecondaryIndexSetting{})
 	count := 4
 	i := 0
-	expectedEntries := make([]*Entry, count)
+	expectedEntries := make([]*core.Entry, count)
 	for i < count {
-		body := make(map[string]AttributeValue)
+		body := make(map[string]core.AttributeValue)
 		partitionKey := "foo"
-		body["partitionKey"] = AttributeValue{S: &partitionKey}
+		body["partitionKey"] = core.AttributeValue{S: &partitionKey}
 		sortKey := fmt.Sprintf("bar%d", i)
-		body["sortKey"] = AttributeValue{S: &sortKey}
+		body["sortKey"] = core.AttributeValue{S: &sortKey}
 		version := "1"
-		body["version"] = AttributeValue{N: &version}
-		entry := &Entry{
+		body["version"] = core.AttributeValue{N: &version}
+		entry := &core.Entry{
 			Body: body,
 		}
 
@@ -492,7 +493,7 @@ func TestInnerStorageQuery(t *testing.T) {
 	// Test query with SortKeyPredicate
 	{
 		partitionKey := []byte("foo")
-		sortKeyPredicate := func(entry *Entry) (bool, error) {
+		sortKeyPredicate := func(entry *core.Entry) (bool, error) {
 			sortKey, ok := entry.Body["sortKey"]
 			if !ok {
 				return false, nil
@@ -535,20 +536,20 @@ func TestInnerStorageQueryWithGsiNoSortKey(t *testing.T) {
 	storage := createTestInnerStorageWithGSI(gsiSettings)
 	count := 4
 	i := 0
-	expectedEntries := make([]*Entry, count)
+	expectedEntries := make([]*core.Entry, count)
 	for i < count {
-		body := make(map[string]AttributeValue)
+		body := make(map[string]core.AttributeValue)
 		partitionKey := "foo"
-		body["partitionKey"] = AttributeValue{S: &partitionKey}
+		body["partitionKey"] = core.AttributeValue{S: &partitionKey}
 		sortKey := fmt.Sprintf("bar%d", i)
-		body["sortKey"] = AttributeValue{S: &sortKey}
+		body["sortKey"] = core.AttributeValue{S: &sortKey}
 		gsiPartitionKey := fmt.Sprintf("gsiFoo")
-		body["gsi1PartitionKey"] = AttributeValue{S: &gsiPartitionKey}
+		body["gsi1PartitionKey"] = core.AttributeValue{S: &gsiPartitionKey}
 		gsiSortKey := fmt.Sprintf("gsiBar%d", i)
-		body["gsi1SortKey"] = AttributeValue{S: &gsiSortKey}
+		body["gsi1SortKey"] = core.AttributeValue{S: &gsiSortKey}
 		version := "1"
-		body["version"] = AttributeValue{N: &version}
-		entry := &Entry{
+		body["version"] = core.AttributeValue{N: &version}
+		entry := &core.Entry{
 			Body: body,
 		}
 
@@ -603,20 +604,20 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 	storage := createTestInnerStorageWithGSI(gsiSettings)
 	count := 4
 	i := 0
-	expectedEntries := make([]*Entry, count)
+	expectedEntries := make([]*core.Entry, count)
 	for i < count {
-		body := make(map[string]AttributeValue)
+		body := make(map[string]core.AttributeValue)
 		partitionKey := "foo"
-		body["partitionKey"] = AttributeValue{S: &partitionKey}
+		body["partitionKey"] = core.AttributeValue{S: &partitionKey}
 		sortKey := fmt.Sprintf("bar%d", i)
-		body["sortKey"] = AttributeValue{S: &sortKey}
+		body["sortKey"] = core.AttributeValue{S: &sortKey}
 		gsiPartitionKey := fmt.Sprintf("gsiFoo")
-		body["gsi1PartitionKey"] = AttributeValue{S: &gsiPartitionKey}
+		body["gsi1PartitionKey"] = core.AttributeValue{S: &gsiPartitionKey}
 		gsiSortKey := fmt.Sprintf("gsiBar%d", i)
-		body["gsi1SortKey"] = AttributeValue{S: &gsiSortKey}
+		body["gsi1SortKey"] = core.AttributeValue{S: &gsiSortKey}
 		version := "1"
-		body["version"] = AttributeValue{N: &version}
-		entry := &Entry{
+		body["version"] = core.AttributeValue{N: &version}
+		entry := &core.Entry{
 			Body: body,
 		}
 
@@ -706,7 +707,7 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 	// Test query with SortKeyPredicate
 	{
 		partitionKey := []byte("gsiFoo")
-		sortKeyPredicate := func(entry *Entry) (bool, error) {
+		sortKeyPredicate := func(entry *core.Entry) (bool, error) {
 			sortKey, ok := entry.Body["gsi1SortKey"]
 			if !ok {
 				return false, nil
@@ -747,19 +748,19 @@ func TestInnerStorageUpdate(t *testing.T) {
 		name                      string
 		updateExpressionContent   string
 		expressionAttributeNames  map[string]string
-		expressionAttributeValues map[string]AttributeValue
+		expressionAttributeValues map[string]core.AttributeValue
 		itemExists                bool
-		expected                  map[string]AttributeValue
+		expected                  map[string]core.AttributeValue
 		expectError               bool
 	}{
 		{
 			name:                    "Update existing attribute",
 			updateExpressionContent: "SET version = :newVersion",
-			expressionAttributeValues: map[string]AttributeValue{
+			expressionAttributeValues: map[string]core.AttributeValue{
 				":newVersion": {N: aws.String("2")},
 			},
 			itemExists: true,
-			expected: map[string]AttributeValue{
+			expected: map[string]core.AttributeValue{
 				"partitionKey": {S: &partitionKey},
 				"sortKey":      {S: &sortKey},
 				"version":      {N: aws.String("2")},
@@ -769,11 +770,11 @@ func TestInnerStorageUpdate(t *testing.T) {
 		{
 			name:                    "Add new attribute",
 			updateExpressionContent: "SET newAttribute = :newValue",
-			expressionAttributeValues: map[string]AttributeValue{
+			expressionAttributeValues: map[string]core.AttributeValue{
 				":newValue": {S: aws.String("newValue")},
 			},
 			itemExists: true,
-			expected: map[string]AttributeValue{
+			expected: map[string]core.AttributeValue{
 				"partitionKey": {S: &partitionKey},
 				"sortKey":      {S: &sortKey},
 				"version":      {N: aws.String("1")},
@@ -784,9 +785,9 @@ func TestInnerStorageUpdate(t *testing.T) {
 		{
 			name:                      "Remove existing attribute",
 			updateExpressionContent:   "REMOVE version",
-			expressionAttributeValues: map[string]AttributeValue{},
+			expressionAttributeValues: map[string]core.AttributeValue{},
 			itemExists:                true,
-			expected: map[string]AttributeValue{
+			expected: map[string]core.AttributeValue{
 				"partitionKey": {S: &partitionKey},
 				"sortKey":      {S: &sortKey},
 			},
@@ -795,11 +796,11 @@ func TestInnerStorageUpdate(t *testing.T) {
 		{
 			name:                    "Update non-existent attribute",
 			updateExpressionContent: "SET nonExistent = :value",
-			expressionAttributeValues: map[string]AttributeValue{
+			expressionAttributeValues: map[string]core.AttributeValue{
 				":value": {S: aws.String("value")},
 			},
 			itemExists: true,
-			expected: map[string]AttributeValue{
+			expected: map[string]core.AttributeValue{
 				"partitionKey": {S: &partitionKey},
 				"sortKey":      {S: &sortKey},
 				"version":      {N: aws.String("1")},
@@ -810,11 +811,11 @@ func TestInnerStorageUpdate(t *testing.T) {
 		{
 			name:                    "Update with non-existent item",
 			updateExpressionContent: "SET newAttribute = :newValue",
-			expressionAttributeValues: map[string]AttributeValue{
+			expressionAttributeValues: map[string]core.AttributeValue{
 				":newValue": {S: aws.String("newValue")},
 			},
 			itemExists: false,
-			expected: map[string]AttributeValue{
+			expected: map[string]core.AttributeValue{
 				"partitionKey": {S: &partitionKey},
 				"sortKey":      {S: &sortKey},
 				"newAttribute": {S: aws.String("newValue")},
@@ -827,14 +828,14 @@ func TestInnerStorageUpdate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Insert initial entry
 			if tt.itemExists {
-				body := make(map[string]AttributeValue)
+				body := make(map[string]core.AttributeValue)
 				partitionKey := "foo"
-				body["partitionKey"] = AttributeValue{S: &partitionKey}
+				body["partitionKey"] = core.AttributeValue{S: &partitionKey}
 				sortKey := "bar"
-				body["sortKey"] = AttributeValue{S: &sortKey}
+				body["sortKey"] = core.AttributeValue{S: &sortKey}
 				version := "1"
-				body["version"] = AttributeValue{N: &version}
-				entry := &Entry{
+				body["version"] = core.AttributeValue{N: &version}
+				entry := &core.Entry{
 					Body: body,
 				}
 
@@ -847,10 +848,10 @@ func TestInnerStorageUpdate(t *testing.T) {
 				}
 			}
 
-			body := make(map[string]AttributeValue)
-			body["partitionKey"] = AttributeValue{S: &partitionKey}
-			body["sortKey"] = AttributeValue{S: &sortKey}
-			key := &Entry{
+			body := make(map[string]core.AttributeValue)
+			body["partitionKey"] = core.AttributeValue{S: &partitionKey}
+			body["sortKey"] = core.AttributeValue{S: &sortKey}
+			key := &core.Entry{
 				Body: body,
 			}
 
@@ -898,14 +899,14 @@ func TestInnerStorageQueryItemCount(t *testing.T) {
 
 	// Insert items
 	for i := 0; i < 5; i++ {
-		body := make(map[string]AttributeValue)
+		body := make(map[string]core.AttributeValue)
 		partitionKey := fmt.Sprintf("foo%d", i)
-		body["partitionKey"] = AttributeValue{S: &partitionKey}
+		body["partitionKey"] = core.AttributeValue{S: &partitionKey}
 		sortKey := fmt.Sprintf("bar%d", i)
-		body["sortKey"] = AttributeValue{S: &sortKey}
+		body["sortKey"] = core.AttributeValue{S: &sortKey}
 		version := "1"
-		body["version"] = AttributeValue{N: &version}
-		entry := &Entry{
+		body["version"] = core.AttributeValue{N: &version}
+		entry := &core.Entry{
 			Body: body,
 		}
 

@@ -2,30 +2,28 @@ package ddb
 
 import (
 	"fmt"
+	"github.com/ocowchun/baddb/ddb/core"
 	"github.com/ocowchun/baddb/expression"
 	"github.com/ocowchun/baddb/expression/ast"
 	"strconv"
 )
 
 type UpdateOperation struct {
-	//entry                     *Entry
 	updateExpression          *ast.UpdateExpression
 	expressionAttributeNames  map[string]string
-	expressionAttributeValues map[string]AttributeValue
+	expressionAttributeValues map[string]core.AttributeValue
 }
 
 func BuildUpdateOperation(
-	//entry *Entry,
 	updateExpressionContent string,
 	expressionAttributeNames map[string]string,
-	expressionAttributeValues map[string]AttributeValue,
+	expressionAttributeValues map[string]core.AttributeValue,
 ) (*UpdateOperation, error) {
 	updateExpression, err := expression.ParseUpdateExpression(updateExpressionContent)
 	if err != nil {
 		return nil, err
 	}
 	op := &UpdateOperation{
-		//entry:                     entry,
 		updateExpression:          updateExpression,
 		expressionAttributeNames:  expressionAttributeNames,
 		expressionAttributeValues: expressionAttributeValues,
@@ -34,7 +32,7 @@ func BuildUpdateOperation(
 	return op, nil
 }
 
-func (o *UpdateOperation) Perform(entry *Entry) error {
+func (o *UpdateOperation) Perform(entry *core.Entry) error {
 	if o.updateExpression.Set != nil {
 		err := o.performSetClause(entry)
 		if err != nil {
@@ -66,7 +64,7 @@ func (o *UpdateOperation) Perform(entry *Entry) error {
 	return nil
 }
 
-func (o *UpdateOperation) performSetClause(entry *Entry) error {
+func (o *UpdateOperation) performSetClause(entry *core.Entry) error {
 	for _, action := range o.updateExpression.Set.Actions {
 		path, err := o.buildPath(action.Path)
 
@@ -88,7 +86,7 @@ func (o *UpdateOperation) performSetClause(entry *Entry) error {
 	return nil
 }
 
-func (o *UpdateOperation) performRemoveClause(entry *Entry) error {
+func (o *UpdateOperation) performRemoveClause(entry *core.Entry) error {
 	for _, action := range o.updateExpression.Remove.Paths {
 		path, err := o.buildPath(action)
 		if err != nil {
@@ -104,7 +102,7 @@ func (o *UpdateOperation) performRemoveClause(entry *Entry) error {
 	return nil
 }
 
-func (o *UpdateOperation) performAddClause(entry *Entry) error {
+func (o *UpdateOperation) performAddClause(entry *core.Entry) error {
 	// The ADD action only supports Number and set data types. In addition, ADD can only be used on top-level attributes, not nested attributes.
 	for _, action := range o.updateExpression.Add.Actions {
 		path, err := o.buildPath(action.Path)
@@ -112,7 +110,7 @@ func (o *UpdateOperation) performAddClause(entry *Entry) error {
 			return err
 		}
 
-		attributeName, ok := path.(*AttributeNameOperand)
+		attributeName, ok := path.(*core.AttributeNameOperand)
 		if !ok {
 			return fmt.Errorf("Invalid UpdateExpression: Syntax error; token: \"%s\"", attributeName.String())
 		}
@@ -131,7 +129,7 @@ func (o *UpdateOperation) performAddClause(entry *Entry) error {
 	return nil
 }
 
-func (o *UpdateOperation) performDeleteClause(entry *Entry) error {
+func (o *UpdateOperation) performDeleteClause(entry *core.Entry) error {
 	//The DELETE action supports only Set data types.
 	for _, action := range o.updateExpression.Delete.Actions {
 		path, err := o.buildPath(action.Path)
@@ -139,7 +137,7 @@ func (o *UpdateOperation) performDeleteClause(entry *Entry) error {
 			return err
 		}
 
-		attributeName, ok := path.(*AttributeNameOperand)
+		attributeName, ok := path.(*core.AttributeNameOperand)
 		if !ok {
 			return fmt.Errorf("Invalid UpdateExpression: Syntax error; token: \"%s\"", attributeName.String())
 		}
@@ -158,38 +156,37 @@ func (o *UpdateOperation) performDeleteClause(entry *Entry) error {
 	return nil
 }
 
-func (o *UpdateOperation) extractValue(entry *Entry, v ast.SetActionValue) (AttributeValue, error) {
+func (o *UpdateOperation) extractValue(entry *core.Entry, v ast.SetActionValue) (core.AttributeValue, error) {
 	switch v := v.(type) {
 	case *ast.AttributeNameOperand:
 		if v.HasColon != false {
 			val, ok := o.expressionAttributeValues[v.String()]
 			if !ok {
-				return AttributeValue{}, fmt.Errorf("attribute value not found: %s", v.String())
+				return core.AttributeValue{}, fmt.Errorf("attribute value not found: %s", v.String())
 			}
 			return val, nil
 		}
 
 		path, err := o.buildPath(v)
 		if err != nil {
-			return AttributeValue{}, err
+			return core.AttributeValue{}, err
 		}
 
-		return getValueFromPath(entry.Body, path)
+		return entry.Get(path)
 	case *ast.DotOperand:
 		path, err := o.buildPath(v)
 		if err != nil {
-			return AttributeValue{}, err
+			return core.AttributeValue{}, err
 		}
 
-		return getValueFromPath(entry.Body, path)
-
+		return entry.Get(path)
 	case *ast.IndexOperand:
 		path, err := o.buildPath(v)
 		if err != nil {
-			return AttributeValue{}, err
+			return core.AttributeValue{}, err
 		}
 
-		return getValueFromPath(entry.Body, path)
+		return entry.Get(path)
 	case *ast.IfNotExistsExpression:
 		left, err := o.extractValue(entry, v.Path)
 		// TODO: check err is pathNotFound
@@ -200,69 +197,68 @@ func (o *UpdateOperation) extractValue(entry *Entry, v ast.SetActionValue) (Attr
 	case *ast.ListAppendExpression:
 		target, err := o.extractValue(entry, v.Target)
 		if err != nil {
-			return AttributeValue{}, err
+			return core.AttributeValue{}, err
 		}
 		if target.L == nil {
-			return AttributeValue{}, fmt.Errorf("target must be list")
+			return core.AttributeValue{}, fmt.Errorf("target must be list")
 		}
 
 		source, err := o.extractValue(entry, v.Source)
 		if err != nil {
-			return AttributeValue{}, err
+			return core.AttributeValue{}, err
 		}
 		if source.L == nil {
-			return AttributeValue{}, fmt.Errorf("source must be list")
+			return core.AttributeValue{}, fmt.Errorf("source must be list")
 		}
 
 		newList := append(*target.L, *source.L...)
-		return AttributeValue{
+		return core.AttributeValue{
 			L: &newList,
 		}, nil
 	case *ast.SetActionInfixExpression:
 		left, err := o.extractValue(entry, v.Left)
 		if err != nil {
-			return AttributeValue{}, err
+			return core.AttributeValue{}, err
 		}
 
 		right, err := o.extractValue(entry, v.Right)
 		if err != nil {
-			return AttributeValue{}, err
+			return core.AttributeValue{}, err
 		}
 		if left.N == nil || right.N == nil {
-			return AttributeValue{}, fmt.Errorf("left and right operand must be number")
+			return core.AttributeValue{}, fmt.Errorf("left and right operand must be number")
 		}
 
 		numLeft, err := strconv.ParseFloat(*left.N, 64)
 		if err != nil {
-			return AttributeValue{}, err
+			return core.AttributeValue{}, err
 		}
 
 		numRight, err := strconv.ParseFloat(*right.N, 64)
 		if err != nil {
-			return AttributeValue{}, err
+			return core.AttributeValue{}, err
 		}
 
 		if v.Operator == "-" {
 			val := fmt.Sprintf("%v", numLeft-numRight)
-			return AttributeValue{
+			return core.AttributeValue{
 				N: &val,
 			}, nil
 		} else if v.Operator == "+" {
 			val := fmt.Sprintf("%v", numLeft+numRight)
-			return AttributeValue{
+			return core.AttributeValue{
 				N: &val,
 			}, nil
 		} else {
-			return AttributeValue{}, fmt.Errorf("unsupported operator: %s", v.Operator)
+			return core.AttributeValue{}, fmt.Errorf("unsupported operator: %s", v.Operator)
 		}
 
 	default:
-		return AttributeValue{}, fmt.Errorf("unsupported operand type: %T", v)
+		return core.AttributeValue{}, fmt.Errorf("unsupported operand type: %T", v)
 	}
 }
 
-// TODO: refactor this
-func (o *UpdateOperation) buildPath(operand ast.PathOperand) (PathOperand, error) {
+func (o *UpdateOperation) buildPath(operand ast.PathOperand) (core.PathOperand, error) {
 	switch operand := operand.(type) {
 	case *ast.AttributeNameOperand:
 		if operand.HasSharp {
@@ -272,14 +268,14 @@ func (o *UpdateOperation) buildPath(operand ast.PathOperand) (PathOperand, error
 				msg := fmt.Sprintf("An expression attribute name used in the document path is not defined; attribute name: %s", key)
 				return nil, fmt.Errorf(msg)
 			}
-			return &AttributeNameOperand{
+			return &core.AttributeNameOperand{
 				Name: name,
 			}, nil
 		} else if operand.HasColon {
 			return nil, fmt.Errorf("path contains attribute value: %s", operand.Identifier.TokenLiteral())
 		} else {
 			name := operand.Identifier.TokenLiteral()
-			return &AttributeNameOperand{
+			return &core.AttributeNameOperand{
 				Name: name,
 			}, nil
 		}
@@ -289,7 +285,7 @@ func (o *UpdateOperation) buildPath(operand ast.PathOperand) (PathOperand, error
 			return nil, err
 		}
 
-		return &IndexOperand{
+		return &core.IndexOperand{
 			Left:  left,
 			Index: operand.Index,
 		}, nil
@@ -303,7 +299,7 @@ func (o *UpdateOperation) buildPath(operand ast.PathOperand) (PathOperand, error
 		if err != nil {
 			return nil, err
 		}
-		return &DotOperand{
+		return &core.DotOperand{
 			Left:  left,
 			Right: right,
 		}, nil

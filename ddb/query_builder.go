@@ -3,13 +3,14 @@ package ddb
 import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/ocowchun/baddb/ddb/core"
 	"github.com/ocowchun/baddb/expression/ast"
 	"log"
 )
 
 type QueryBuilder struct {
 	KeyConditionExpression    *ast.KeyConditionExpression
-	ExpressionAttributeValues map[string]AttributeValue
+	ExpressionAttributeValues map[string]core.AttributeValue
 	ExpressionAttributeNames  map[string]string
 	TableMetadata             *TableMetaData
 	ExclusiveStartKey         map[string]types.AttributeValue
@@ -116,7 +117,7 @@ func (b *QueryBuilder) BuildQuery() (*Query, error) {
 		bs := make([]byte, 0)
 		tablePartitionKey := b.TableMetadata.PartitionKeySchema.AttributeName
 		if val, ok := b.ExclusiveStartKey[tablePartitionKey]; ok {
-			bs = TransformDdbAttributeValue(val).Bytes()
+			bs = core.TransformDdbAttributeValue(val).Bytes()
 		} else {
 			return nil, fmt.Errorf("partition key %s not found in ExclusiveStartKey", tablePartitionKey)
 		}
@@ -125,7 +126,7 @@ func (b *QueryBuilder) BuildQuery() (*Query, error) {
 			tableSortKey := b.TableMetadata.SortKeySchema.AttributeName
 			if val, ok := b.ExclusiveStartKey[tableSortKey]; ok {
 				bs = append(bs, []byte("|")...)
-				bs = append(bs, TransformDdbAttributeValue(val).Bytes()...)
+				bs = append(bs, core.TransformDdbAttributeValue(val).Bytes()...)
 			} else {
 				return nil, fmt.Errorf("sort key %s not found in ExclusiveStartKey", tableSortKey)
 			}
@@ -157,7 +158,7 @@ func (b *QueryBuilder) extractPartitionKeyPrefix(expression ast.PredicateExpress
 	return nil, fmt.Errorf("failed to extract PartitionKey PartitionKey")
 }
 
-type Predicate func(entry *Entry) (bool, error)
+type Predicate func(entry *core.Entry) (bool, error)
 
 func (b *QueryBuilder) extractAttributeName(attributeName ast.AttributeName) (string, error) {
 	a, ok := attributeName.(*ast.AttributeNameIdentifier)
@@ -173,7 +174,7 @@ func (b *QueryBuilder) extractAttributeName(attributeName ast.AttributeName) (st
 	return key, nil
 }
 
-func (b *QueryBuilder) extractAttributeValue(identifier *ast.AttributeValueIdentifier) (*AttributeValue, error) {
+func (b *QueryBuilder) extractAttributeValue(identifier *ast.AttributeValueIdentifier) (*core.AttributeValue, error) {
 	key := identifier.String()
 	val, ok := b.ExpressionAttributeValues[key]
 	if !ok {
@@ -241,7 +242,7 @@ func (b *QueryBuilder) EvaluatePredicateExpression(expression ast.PredicateExpre
 
 		switch pred.Operator {
 		case "=":
-			return func(entry *Entry) (bool, error) {
+			return func(entry *core.Entry) (bool, error) {
 				val, ok := entry.Body[key]
 				if !ok {
 					return false, fmt.Errorf("key %s not found", key)
@@ -250,7 +251,7 @@ func (b *QueryBuilder) EvaluatePredicateExpression(expression ast.PredicateExpre
 				return val.Equal(*otherVal), nil
 			}, nil
 		case "<":
-			return func(entry *Entry) (bool, error) {
+			return func(entry *core.Entry) (bool, error) {
 				val, ok := entry.Body[key]
 				if !ok {
 					return false, fmt.Errorf("key %s not found", key)
@@ -264,7 +265,7 @@ func (b *QueryBuilder) EvaluatePredicateExpression(expression ast.PredicateExpre
 			}, nil
 
 		case "<=":
-			return func(entry *Entry) (bool, error) {
+			return func(entry *core.Entry) (bool, error) {
 				val, ok := entry.Body[key]
 				if !ok {
 					return false, fmt.Errorf("key %s not found", key)
@@ -278,7 +279,7 @@ func (b *QueryBuilder) EvaluatePredicateExpression(expression ast.PredicateExpre
 			}, nil
 
 		case ">":
-			return func(entry *Entry) (bool, error) {
+			return func(entry *core.Entry) (bool, error) {
 				val, ok := entry.Body[key]
 				if !ok {
 					return false, fmt.Errorf("key %s not found", key)
@@ -291,7 +292,7 @@ func (b *QueryBuilder) EvaluatePredicateExpression(expression ast.PredicateExpre
 				return res > 0, nil
 			}, nil
 		case ">=":
-			return func(entry *Entry) (bool, error) {
+			return func(entry *core.Entry) (bool, error) {
 				val, ok := entry.Body[key]
 				if !ok {
 					return false, fmt.Errorf("key %s not found", key)
@@ -333,7 +334,7 @@ func (b *QueryBuilder) EvaluatePredicateExpression(expression ast.PredicateExpre
 		}
 
 		//pred.
-		return func(entry *Entry) (bool, error) {
+		return func(entry *core.Entry) (bool, error) {
 			val, ok := entry.Body[key]
 			if !ok {
 				return false, fmt.Errorf("key %s not found", key)

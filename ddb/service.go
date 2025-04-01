@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/ocowchun/baddb/ddb/core"
 	"github.com/ocowchun/baddb/expression"
 	"sync"
 	"time"
@@ -328,7 +329,7 @@ func (svc *Service) PutItem(ctx context.Context, input *dynamodb.PutItemInput) (
 
 	tableName := *input.TableName
 	if _, ok := svc.tableMetadatas[tableName]; ok {
-		entry := NewEntryFromItem(input.Item)
+		entry := core.NewEntryFromItem(input.Item)
 
 		var condition *Condition
 		var err error
@@ -336,7 +337,7 @@ func (svc *Service) PutItem(ctx context.Context, input *dynamodb.PutItemInput) (
 			condition, err = BuildCondition(
 				*input.ConditionExpression,
 				input.ExpressionAttributeNames,
-				NewEntryFromItem(input.ExpressionAttributeValues).Body,
+				core.NewEntryFromItem(input.ExpressionAttributeValues).Body,
 			)
 			if err != nil {
 				return nil, &ValidationException{
@@ -388,7 +389,7 @@ func (svc *Service) UpdateItem(ctx context.Context, input *dynamodb.UpdateItemIn
 		updateOperation, err := BuildUpdateOperation(
 			*input.UpdateExpression,
 			input.ExpressionAttributeNames,
-			NewEntryFromItem(input.ExpressionAttributeValues).Body)
+			core.NewEntryFromItem(input.ExpressionAttributeValues).Body)
 		if err != nil {
 			return nil, &ValidationException{
 				Message: err.Error(),
@@ -400,7 +401,7 @@ func (svc *Service) UpdateItem(ctx context.Context, input *dynamodb.UpdateItemIn
 			condition, err = BuildCondition(
 				*input.ConditionExpression,
 				input.ExpressionAttributeNames,
-				NewEntryFromItem(input.ExpressionAttributeValues).Body,
+				core.NewEntryFromItem(input.ExpressionAttributeValues).Body,
 			)
 			if err != nil {
 				return nil, &ValidationException{
@@ -410,7 +411,7 @@ func (svc *Service) UpdateItem(ctx context.Context, input *dynamodb.UpdateItemIn
 		}
 
 		req := &UpdateRequest{
-			Key:             NewEntryFromItem(input.Key),
+			Key:             core.NewEntryFromItem(input.Key),
 			UpdateOperation: updateOperation,
 			TableName:       tableName,
 			Condition:       condition,
@@ -422,7 +423,7 @@ func (svc *Service) UpdateItem(ctx context.Context, input *dynamodb.UpdateItemIn
 
 		// TODO: consider ReturnValues
 		output := &dynamodb.UpdateItemOutput{
-			Attributes: NewItemFromEntry(res.NewEntry.Body),
+			Attributes: core.NewItemFromEntry(res.NewEntry.Body),
 		}
 
 		return output, nil
@@ -448,7 +449,7 @@ func (svc *Service) DeleteItem(ctx context.Context, input *dynamodb.DeleteItemIn
 			condition, err = BuildCondition(
 				*input.ConditionExpression,
 				input.ExpressionAttributeNames,
-				NewEntryFromItem(input.ExpressionAttributeValues).Body,
+				core.NewEntryFromItem(input.ExpressionAttributeValues).Body,
 			)
 			if err != nil {
 				return nil, &ValidationException{
@@ -457,7 +458,7 @@ func (svc *Service) DeleteItem(ctx context.Context, input *dynamodb.DeleteItemIn
 			}
 		}
 
-		entry := NewEntryFromItem(input.Key)
+		entry := core.NewEntryFromItem(input.Key)
 		req := &DeleteRequest{
 			Entry:     entry,
 			TableName: tableName,
@@ -493,7 +494,7 @@ func (svc *Service) GetItem(ctx context.Context, input *dynamodb.GetItemInput) (
 		}
 
 		req := &GetRequest{
-			Entry:          NewEntryFromItem(input.Key),
+			Entry:          core.NewEntryFromItem(input.Key),
 			ConsistentRead: consistentRead,
 			TableName:      tableName,
 		}
@@ -510,7 +511,7 @@ func (svc *Service) GetItem(ctx context.Context, input *dynamodb.GetItemInput) (
 			return &output, nil
 		}
 
-		item := NewItemFromEntry(entry.Body)
+		item := core.NewItemFromEntry(entry.Body)
 		output := dynamodb.GetItemOutput{
 			Item: item,
 		}
@@ -567,9 +568,9 @@ func (svc *Service) Query(ctx context.Context, input *dynamodb.QueryInput) (*dyn
 		}
 		return nil, err
 	}
-	expressionAttributeValues := make(map[string]AttributeValue)
+	expressionAttributeValues := make(map[string]core.AttributeValue)
 	for k, v := range input.ExpressionAttributeValues {
-		expressionAttributeValues[k] = TransformDdbAttributeValue(v)
+		expressionAttributeValues[k] = core.TransformDdbAttributeValue(v)
 	}
 
 	builder := QueryBuilder{
@@ -597,7 +598,7 @@ func (svc *Service) Query(ctx context.Context, input *dynamodb.QueryInput) (*dyn
 	entries := res.Entries
 	items := make([]map[string]types.AttributeValue, len(entries))
 	for i, entry := range entries {
-		items[i] = NewItemFromEntry(entry.Body)
+		items[i] = core.NewItemFromEntry(entry.Body)
 	}
 
 	lastEvaluatedKey := make(map[string]types.AttributeValue)
@@ -713,7 +714,7 @@ func (svc *Service) validateTransactWriteItemsInput(input *dynamodb.TransactWrit
 					Message: &msg,
 				}
 			}
-			pk, err = svc.buildTablePrimaryKey(NewEntryFromItem(conditionCheck.Key), tableMetadata)
+			pk, err = svc.buildTablePrimaryKey(core.NewEntryFromItem(conditionCheck.Key), tableMetadata)
 			if err != nil {
 				return err
 			}
@@ -728,7 +729,7 @@ func (svc *Service) validateTransactWriteItemsInput(input *dynamodb.TransactWrit
 					Message: &msg,
 				}
 			}
-			pk, err = svc.buildTablePrimaryKey(NewEntryFromItem(put.Item), tableMetadata)
+			pk, err = svc.buildTablePrimaryKey(core.NewEntryFromItem(put.Item), tableMetadata)
 			if err != nil {
 				return err
 			}
@@ -743,7 +744,7 @@ func (svc *Service) validateTransactWriteItemsInput(input *dynamodb.TransactWrit
 					Message: &msg,
 				}
 			}
-			pk, err = svc.buildTablePrimaryKey(NewEntryFromItem(deleteReq.Key), tableMetadata)
+			pk, err = svc.buildTablePrimaryKey(core.NewEntryFromItem(deleteReq.Key), tableMetadata)
 			if err != nil {
 				return err
 			}
@@ -758,7 +759,7 @@ func (svc *Service) validateTransactWriteItemsInput(input *dynamodb.TransactWrit
 					Message: &msg,
 				}
 			}
-			pk, err = svc.buildTablePrimaryKey(NewEntryFromItem(update.Key), tableMetadata)
+			pk, err = svc.buildTablePrimaryKey(core.NewEntryFromItem(update.Key), tableMetadata)
 			if err != nil {
 				return err
 			}
@@ -782,7 +783,7 @@ func (svc *Service) validateTransactWriteItemsInput(input *dynamodb.TransactWrit
 }
 
 // TODO: refactor it
-func (svc *Service) buildTablePrimaryKey(entry *Entry, table *TableMetaData) (*PrimaryKey, error) {
+func (svc *Service) buildTablePrimaryKey(entry *core.Entry, table *TableMetaData) (*PrimaryKey, error) {
 	primaryKey := &PrimaryKey{
 		PartitionKey: make([]byte, 0),
 		SortKey:      make([]byte, 0),
@@ -844,7 +845,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 			condition, err = BuildCondition(
 				*conditionCheck.ConditionExpression,
 				conditionCheck.ExpressionAttributeNames,
-				NewEntryFromItem(conditionCheck.ExpressionAttributeValues).Body,
+				core.NewEntryFromItem(conditionCheck.ExpressionAttributeValues).Body,
 			)
 			if err != nil {
 				return nil, &ValidationException{
@@ -852,7 +853,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				}
 			}
 
-			key := NewEntryFromItem(conditionCheck.Key)
+			key := core.NewEntryFromItem(conditionCheck.Key)
 			req := &GetRequest{
 				Entry:          key,
 				TableName:      tableName,
@@ -864,8 +865,8 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 			}
 
 			if entry == nil {
-				entry = &Entry{
-					Body: make(map[string]AttributeValue),
+				entry = &core.Entry{
+					Body: make(map[string]core.AttributeValue),
 				}
 			}
 			matched, err := condition.Check(entry)
@@ -898,7 +899,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				condition, err = BuildCondition(
 					*put.ConditionExpression,
 					put.ExpressionAttributeNames,
-					NewEntryFromItem(put.ExpressionAttributeValues).Body,
+					core.NewEntryFromItem(put.ExpressionAttributeValues).Body,
 				)
 				if err != nil {
 					return nil, &ValidationException{
@@ -907,7 +908,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				}
 			}
 
-			entry := NewEntryFromItem(put.Item)
+			entry := core.NewEntryFromItem(put.Item)
 			req := &PutRequest{
 				Entry:     entry,
 				TableName: tableName,
@@ -933,7 +934,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				condition, err = BuildCondition(
 					*deleteReq.ConditionExpression,
 					deleteReq.ExpressionAttributeNames,
-					NewEntryFromItem(deleteReq.ExpressionAttributeValues).Body,
+					core.NewEntryFromItem(deleteReq.ExpressionAttributeValues).Body,
 				)
 				if err != nil {
 					return nil, &ValidationException{
@@ -942,7 +943,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				}
 			}
 
-			entry := NewEntryFromItem(deleteReq.Key)
+			entry := core.NewEntryFromItem(deleteReq.Key)
 			req := &DeleteRequest{
 				Entry:     entry,
 				TableName: tableName,
@@ -974,7 +975,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 			updateOperation, err := BuildUpdateOperation(
 				*updateReq.UpdateExpression,
 				updateReq.ExpressionAttributeNames,
-				NewEntryFromItem(updateReq.ExpressionAttributeValues).Body)
+				core.NewEntryFromItem(updateReq.ExpressionAttributeValues).Body)
 			if err != nil {
 				return nil, &ValidationException{
 					Message: err.Error(),
@@ -986,7 +987,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				condition, err = BuildCondition(
 					*updateReq.ConditionExpression,
 					updateReq.ExpressionAttributeNames,
-					NewEntryFromItem(updateReq.ExpressionAttributeValues).Body,
+					core.NewEntryFromItem(updateReq.ExpressionAttributeValues).Body,
 				)
 				if err != nil {
 					return nil, &ValidationException{
@@ -996,7 +997,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 			}
 
 			req := &UpdateRequest{
-				Key:             NewEntryFromItem(updateReq.Key),
+				Key:             core.NewEntryFromItem(updateReq.Key),
 				UpdateOperation: updateOperation,
 				TableName:       tableName,
 				Condition:       condition,
