@@ -142,13 +142,11 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 		Name:                         tableName,
 		BillingMode:                  billingMode,
 	}
-	//table := NewTable(&meta)
 	err := svc.storage.CreateTable(meta)
 	if err != nil {
 		return nil, err
 	}
 
-	//svc.tables[tableName] = table
 	svc.tableMetadatas[tableName] = meta
 
 	itemCount, err := svc.storage.QueryItemCount(tableName)
@@ -360,8 +358,10 @@ func (svc *Service) PutItem(ctx context.Context, input *dynamodb.PutItemInput) (
 			}
 			return nil, err
 		}
+
+		output := &dynamodb.PutItemOutput{}
 		//TODO: add PutItemOutput
-		return nil, nil
+		return output, nil
 	} else {
 		msg := "Cannot do operations on a non-existent table"
 		err := &types.ResourceNotFoundException{
