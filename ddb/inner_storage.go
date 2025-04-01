@@ -8,7 +8,6 @@ import (
 	"fmt"
 	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/time/rate"
-	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -861,10 +860,6 @@ func (s *InnerStorage) Query(req *Query) (*QueryResponse, error) {
 		queryStmt += " DESC"
 		queryStmt += ", primary_key DESC "
 	}
-	if req.ExclusiveStartKey != nil {
-		log.Println(queryStmt, "PartitionKey", string(*req.PartitionKey), "ExclusiveStartKey", string(*req.ExclusiveStartKey))
-
-	}
 
 	queryStmt += " LIMIT ?"
 	// workaround to get enough result in case filter and deleted Entries
@@ -923,11 +918,6 @@ func (s *InnerStorage) Query(req *Query) (*QueryResponse, error) {
 	}
 	res.Entries = results
 	res.ScannedCount = int32(scannedCount)
-	if len(res.Entries) > 0 {
-		l := len(res.Entries)
-		log.Println("last result:", res.Entries[l-1].Body)
-
-	}
 
 	return res, nil
 }
