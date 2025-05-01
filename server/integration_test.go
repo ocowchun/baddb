@@ -145,7 +145,7 @@ func cleanDdbLocal(client *dynamodb.Client) {
 		TableName: aws.String("movie"),
 	})
 	if err != nil && !strings.Contains(err.Error(), "Cannot do operations on a non-existent table") {
-		log.Fatalf("failed to delete table, %v", err)
+		log.Fatalf("failed to delete table from ddb-local, %v", err)
 	}
 
 }

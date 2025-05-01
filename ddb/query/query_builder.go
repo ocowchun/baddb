@@ -1,4 +1,4 @@
-package ddb
+package query
 
 import (
 	"fmt"
@@ -12,7 +12,7 @@ type QueryBuilder struct {
 	KeyConditionExpression    *ast.KeyConditionExpression
 	ExpressionAttributeValues map[string]core.AttributeValue
 	ExpressionAttributeNames  map[string]string
-	TableMetadata             *TableMetaData
+	TableMetadata             *core.TableMetaData
 	ExclusiveStartKey         map[string]types.AttributeValue
 	ConsistentRead            *bool
 	Limit                     *int32

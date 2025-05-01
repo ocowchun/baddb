@@ -1,4 +1,4 @@
-package ddb
+package condition
 
 import (
 	"fmt"

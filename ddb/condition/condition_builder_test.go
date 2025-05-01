@@ -1,4 +1,4 @@
-package ddb
+package condition
 
 import (
 	"github.com/aws/aws-sdk-go-v2/aws"

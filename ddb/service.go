@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	condition2 "github.com/ocowchun/baddb/ddb/condition"
 	"github.com/ocowchun/baddb/ddb/core"
+	"github.com/ocowchun/baddb/ddb/inner_storage"
+	query2 "github.com/ocowchun/baddb/ddb/query"
+	"github.com/ocowchun/baddb/ddb/update"
 	"github.com/ocowchun/baddb/expression"
 	"sync"
 	"time"
@@ -14,14 +18,14 @@ import (
 
 type Service struct {
 	tableLock      sync.RWMutex
-	tableMetadatas map[string]*TableMetaData
-	storage        *InnerStorage
+	tableMetadatas map[string]*core.TableMetaData
+	storage        *inner_storage.InnerStorage
 }
 
 func NewDdbService() *Service {
-	innerStorage := NewInnerStorage()
+	innerStorage := inner_storage.NewInnerStorage()
 	return &Service{
-		tableMetadatas: make(map[string]*TableMetaData),
+		tableMetadatas: make(map[string]*core.TableMetaData),
 		storage:        innerStorage,
 	}
 }
@@ -57,15 +61,15 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 	}
 
 	now := time.Now()
-	var partitionKeySchema *KeySchema
-	var sortKeySchema *KeySchema
+	var partitionKeySchema *core.KeySchema
+	var sortKeySchema *core.KeySchema
 	for _, keySchema := range input.KeySchema {
 		if keySchema.KeyType == types.KeyTypeHash {
-			partitionKeySchema = &KeySchema{
+			partitionKeySchema = &core.KeySchema{
 				AttributeName: *keySchema.AttributeName,
 			}
 		} else {
-			sortKeySchema = &KeySchema{
+			sortKeySchema = &core.KeySchema{
 				AttributeName: *keySchema.AttributeName,
 			}
 		}
@@ -78,7 +82,7 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 		return nil, err
 	}
 
-	gsiSettings := make([]GlobalSecondaryIndexSetting, len(input.GlobalSecondaryIndexes))
+	gsiSettings := make([]core.GlobalSecondaryIndexSetting, len(input.GlobalSecondaryIndexes))
 	for i, gsi := range input.GlobalSecondaryIndexes {
 		nonKeyAttributes := make([]string, len(gsi.Projection.NonKeyAttributes))
 		for i, v := range gsi.Projection.NonKeyAttributes {
@@ -94,17 +98,17 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 				sortKeyName = key.AttributeName
 			}
 		}
-		var projectionType ProjectionType
+		var projectionType core.ProjectionType
 		switch gsi.Projection.ProjectionType {
 		case types.ProjectionTypeKeysOnly:
-			projectionType = PROJECTION_TYPE_KEYS_ONLY
+			projectionType = core.PROJECTION_TYPE_KEYS_ONLY
 		case types.ProjectionTypeInclude:
-			projectionType = PROJECTION_TYPE_INCLUDE
+			projectionType = core.PROJECTION_TYPE_INCLUDE
 		case types.ProjectionTypeAll:
-			projectionType = PROJECTION_TYPE_ALL
+			projectionType = core.PROJECTION_TYPE_ALL
 		}
 
-		gsiSettings[i] = GlobalSecondaryIndexSetting{
+		gsiSettings[i] = core.GlobalSecondaryIndexSetting{
 			IndexName:        gsi.IndexName,
 			PartitionKeyName: partitionKeyName,
 			SortKeyName:      sortKeyName,
@@ -113,9 +117,9 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 		}
 	}
 	// api error ValidationException:
-	billingMode := BILLING_MODE_PAY_PER_REQUEST
+	billingMode := core.BILLING_MODE_PAY_PER_REQUEST
 	if input.BillingMode == types.BillingModeProvisioned {
-		billingMode = BILLING_MODE_PROVISIONED
+		billingMode = core.BILLING_MODE_PROVISIONED
 		if input.ProvisionedThroughput == nil {
 			msg := "No provisioned throughput specified for the table"
 			err := &ValidationException{
@@ -132,7 +136,7 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 		}
 	}
 
-	meta := &TableMetaData{
+	meta := &core.TableMetaData{
 		AttributeDefinitions:         input.AttributeDefinitions,
 		GlobalSecondaryIndexSettings: gsiSettings,
 		LocalSecondaryIndexes:        input.LocalSecondaryIndexes,
@@ -331,10 +335,10 @@ func (svc *Service) PutItem(ctx context.Context, input *dynamodb.PutItemInput) (
 	if _, ok := svc.tableMetadatas[tableName]; ok {
 		entry := core.NewEntryFromItem(input.Item)
 
-		var condition *Condition
+		var condition *condition2.Condition
 		var err error
 		if input.ConditionExpression != nil {
-			condition, err = BuildCondition(
+			condition, err = condition2.BuildCondition(
 				*input.ConditionExpression,
 				input.ExpressionAttributeNames,
 				core.NewEntryFromItem(input.ExpressionAttributeValues).Body,
@@ -346,14 +350,14 @@ func (svc *Service) PutItem(ctx context.Context, input *dynamodb.PutItemInput) (
 			}
 		}
 
-		req := &PutRequest{
+		req := &inner_storage.PutRequest{
 			Entry:     entry,
 			TableName: tableName,
 			Condition: condition,
 		}
 		err = svc.storage.Put(req)
 		if err != nil {
-			if errors.Is(err, RateLimitReachedError) {
+			if errors.Is(err, inner_storage.RateLimitReachedError) {
 				return nil, ProvisionedThroughputExceededException
 
 			}
@@ -386,7 +390,7 @@ func (svc *Service) UpdateItem(ctx context.Context, input *dynamodb.UpdateItemIn
 			return nil, err
 		}
 
-		updateOperation, err := BuildUpdateOperation(
+		updateOperation, err := update.BuildUpdateOperation(
 			*input.UpdateExpression,
 			input.ExpressionAttributeNames,
 			core.NewEntryFromItem(input.ExpressionAttributeValues).Body)
@@ -396,9 +400,9 @@ func (svc *Service) UpdateItem(ctx context.Context, input *dynamodb.UpdateItemIn
 			}
 		}
 
-		var condition *Condition
+		var condition *condition2.Condition
 		if input.ConditionExpression != nil {
-			condition, err = BuildCondition(
+			condition, err = condition2.BuildCondition(
 				*input.ConditionExpression,
 				input.ExpressionAttributeNames,
 				core.NewEntryFromItem(input.ExpressionAttributeValues).Body,
@@ -410,7 +414,7 @@ func (svc *Service) UpdateItem(ctx context.Context, input *dynamodb.UpdateItemIn
 			}
 		}
 
-		req := &UpdateRequest{
+		req := &inner_storage.UpdateRequest{
 			Key:             core.NewEntryFromItem(input.Key),
 			UpdateOperation: updateOperation,
 			TableName:       tableName,
@@ -443,10 +447,10 @@ func (svc *Service) DeleteItem(ctx context.Context, input *dynamodb.DeleteItemIn
 
 	tableName := *input.TableName
 	if _, ok := svc.tableMetadatas[tableName]; ok {
-		var condition *Condition
+		var condition *condition2.Condition
 		var err error
 		if input.ConditionExpression != nil {
-			condition, err = BuildCondition(
+			condition, err = condition2.BuildCondition(
 				*input.ConditionExpression,
 				input.ExpressionAttributeNames,
 				core.NewEntryFromItem(input.ExpressionAttributeValues).Body,
@@ -459,7 +463,7 @@ func (svc *Service) DeleteItem(ctx context.Context, input *dynamodb.DeleteItemIn
 		}
 
 		entry := core.NewEntryFromItem(input.Key)
-		req := &DeleteRequest{
+		req := &inner_storage.DeleteRequest{
 			Entry:     entry,
 			TableName: tableName,
 			Condition: condition,
@@ -493,7 +497,7 @@ func (svc *Service) GetItem(ctx context.Context, input *dynamodb.GetItemInput) (
 			consistentRead = *input.ConsistentRead
 		}
 
-		req := &GetRequest{
+		req := &inner_storage.GetRequest{
 			Entry:          core.NewEntryFromItem(input.Key),
 			ConsistentRead: consistentRead,
 			TableName:      tableName,
@@ -573,7 +577,7 @@ func (svc *Service) Query(ctx context.Context, input *dynamodb.QueryInput) (*dyn
 		expressionAttributeValues[k] = core.TransformDdbAttributeValue(v)
 	}
 
-	builder := QueryBuilder{
+	builder := query2.QueryBuilder{
 		KeyConditionExpression:    keyConditionExpression,
 		ExpressionAttributeValues: expressionAttributeValues,
 		ExpressionAttributeNames:  input.ExpressionAttributeNames,
@@ -700,7 +704,7 @@ func (svc *Service) validateTransactWriteItemsInput(input *dynamodb.TransactWrit
 
 	primaryKeys := make(map[string]map[string]bool)
 	for _, writeItem := range input.TransactItems {
-		var pk *PrimaryKey
+		var pk *inner_storage.PrimaryKey
 		var tableName string
 		var err error
 		if writeItem.ConditionCheck != nil {
@@ -783,8 +787,8 @@ func (svc *Service) validateTransactWriteItemsInput(input *dynamodb.TransactWrit
 }
 
 // TODO: refactor it
-func (svc *Service) buildTablePrimaryKey(entry *core.Entry, table *TableMetaData) (*PrimaryKey, error) {
-	primaryKey := &PrimaryKey{
+func (svc *Service) buildTablePrimaryKey(entry *core.Entry, table *core.TableMetaData) (*inner_storage.PrimaryKey, error) {
+	primaryKey := &inner_storage.PrimaryKey{
 		PartitionKey: make([]byte, 0),
 		SortKey:      make([]byte, 0),
 	}
@@ -835,14 +839,14 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				return nil, err
 			}
 
-			var condition *Condition
+			var condition *condition2.Condition
 			if conditionCheck.ConditionExpression == nil || *conditionCheck.ConditionExpression == "" {
 				return nil, &ValidationException{
 					Message: "The expression can not be empty;",
 				}
 			}
 
-			condition, err = BuildCondition(
+			condition, err = condition2.BuildCondition(
 				*conditionCheck.ConditionExpression,
 				conditionCheck.ExpressionAttributeNames,
 				core.NewEntryFromItem(conditionCheck.ExpressionAttributeValues).Body,
@@ -854,7 +858,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 			}
 
 			key := core.NewEntryFromItem(conditionCheck.Key)
-			req := &GetRequest{
+			req := &inner_storage.GetRequest{
 				Entry:          key,
 				TableName:      tableName,
 				ConsistentRead: true,
@@ -894,9 +898,9 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				return nil, err
 			}
 
-			var condition *Condition
+			var condition *condition2.Condition
 			if put.ConditionExpression != nil {
-				condition, err = BuildCondition(
+				condition, err = condition2.BuildCondition(
 					*put.ConditionExpression,
 					put.ExpressionAttributeNames,
 					core.NewEntryFromItem(put.ExpressionAttributeValues).Body,
@@ -909,7 +913,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 			}
 
 			entry := core.NewEntryFromItem(put.Item)
-			req := &PutRequest{
+			req := &inner_storage.PutRequest{
 				Entry:     entry,
 				TableName: tableName,
 				Condition: condition,
@@ -929,9 +933,9 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				return nil, err
 			}
 
-			var condition *Condition
+			var condition *condition2.Condition
 			if deleteReq.ConditionExpression != nil {
-				condition, err = BuildCondition(
+				condition, err = condition2.BuildCondition(
 					*deleteReq.ConditionExpression,
 					deleteReq.ExpressionAttributeNames,
 					core.NewEntryFromItem(deleteReq.ExpressionAttributeValues).Body,
@@ -944,7 +948,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 			}
 
 			entry := core.NewEntryFromItem(deleteReq.Key)
-			req := &DeleteRequest{
+			req := &inner_storage.DeleteRequest{
 				Entry:     entry,
 				TableName: tableName,
 				Condition: condition,
@@ -972,7 +976,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				return nil, err
 			}
 
-			updateOperation, err := BuildUpdateOperation(
+			updateOperation, err := update.BuildUpdateOperation(
 				*updateReq.UpdateExpression,
 				updateReq.ExpressionAttributeNames,
 				core.NewEntryFromItem(updateReq.ExpressionAttributeValues).Body)
@@ -982,9 +986,9 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				}
 			}
 
-			var condition *Condition
+			var condition *condition2.Condition
 			if updateReq.ConditionExpression != nil {
-				condition, err = BuildCondition(
+				condition, err = condition2.BuildCondition(
 					*updateReq.ConditionExpression,
 					updateReq.ExpressionAttributeNames,
 					core.NewEntryFromItem(updateReq.ExpressionAttributeValues).Body,
@@ -996,7 +1000,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				}
 			}
 
-			req := &UpdateRequest{
+			req := &inner_storage.UpdateRequest{
 				Key:             core.NewEntryFromItem(updateReq.Key),
 				UpdateOperation: updateOperation,
 				TableName:       tableName,

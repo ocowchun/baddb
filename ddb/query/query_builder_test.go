@@ -1,4 +1,4 @@
-package ddb
+package query
 
 import (
 	"bytes"
@@ -22,8 +22,8 @@ func TestSimplePredicateExpression(t *testing.T) {
 				N: aws.String("2025"),
 			},
 		},
-		TableMetadata: &TableMetaData{
-			PartitionKeySchema: &KeySchema{
+		TableMetadata: &core.TableMetaData{
+			PartitionKeySchema: &core.KeySchema{
 				AttributeName: "year",
 			},
 		},
@@ -130,11 +130,11 @@ func TestSimplePredicateExpression_With_SortKey(t *testing.T) {
 		builder := &QueryBuilder{
 			KeyConditionExpression:    keyConditionExpression,
 			ExpressionAttributeValues: expressionAttributeValues,
-			TableMetadata: &TableMetaData{
-				PartitionKeySchema: &KeySchema{
+			TableMetadata: &core.TableMetaData{
+				PartitionKeySchema: &core.KeySchema{
 					AttributeName: "year",
 				},
-				SortKeySchema: &KeySchema{
+				SortKeySchema: &core.KeySchema{
 					AttributeName: "title",
 				},
 			},
@@ -179,11 +179,11 @@ func TestSimplePredicateExpression_With_GSI(t *testing.T) {
 				S: aws.String("9527"),
 			},
 		},
-		TableMetadata: &TableMetaData{
-			PartitionKeySchema: &KeySchema{
+		TableMetadata: &core.TableMetaData{
+			PartitionKeySchema: &core.KeySchema{
 				AttributeName: "year",
 			},
-			GlobalSecondaryIndexSettings: []GlobalSecondaryIndexSetting{
+			GlobalSecondaryIndexSettings: []core.GlobalSecondaryIndexSetting{
 				{
 					IndexName:        &indexName,
 					PartitionKeyName: aws.String("regionCode"),

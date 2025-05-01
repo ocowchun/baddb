@@ -1,4 +1,4 @@
-package ddb
+package inner_storage
 
 import (
 	"database/sql"
@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/ocowchun/baddb/ddb/condition"
 	"github.com/ocowchun/baddb/ddb/core"
+	"github.com/ocowchun/baddb/ddb/query"
+	"github.com/ocowchun/baddb/ddb/update"
 	"golang.org/x/time/rate"
 	"sync"
 	"sync/atomic"
@@ -44,7 +47,7 @@ type InnerTableGlobalSecondaryIndexSetting struct {
 	PartitionKeyName *string
 	SortKeyName      *string
 	NonKeyAttributes []string
-	ProjectionType   ProjectionType
+	ProjectionType   core.ProjectionType
 	readRateLimiter  *rate.Limiter
 }
 
@@ -52,9 +55,9 @@ type InnerTableMetadata struct {
 	Name string
 	// TODO: create inner storage gsi struct to keep rate limiter
 	GlobalSecondaryIndexSettings map[string]InnerTableGlobalSecondaryIndexSetting
-	PartitionKeySchema           *KeySchema
-	SortKeySchema                *KeySchema
-	billingMode                  BillingMode
+	PartitionKeySchema           *core.KeySchema
+	SortKeySchema                *core.KeySchema
+	billingMode                  core.BillingMode
 	readCapacityUnits            int
 	writeCapacityUnits           int
 	readRateLimiter              *rate.Limiter
@@ -84,7 +87,7 @@ func (s *InnerStorage) newGsiTableName() string {
 	return fmt.Sprintf("gsi_%d", s.counter.Add(1))
 }
 
-func (s *InnerStorage) CreateTable(meta *TableMetaData) error {
+func (s *InnerStorage) CreateTable(meta *core.TableMetaData) error {
 	tableName := s.newTableName()
 	sqlStmt := `
 	create table ` + tableName + `(primary_key blob not null primary key, body blob, partition_key blob, sort_key blob);
@@ -92,11 +95,11 @@ func (s *InnerStorage) CreateTable(meta *TableMetaData) error {
 	create index idx_` + tableName + `_partiton_key_sort_key on ` + tableName + `(partition_key, sort_key);
 	`
 
-	billingMode := BILLING_MODE_PAY_PER_REQUEST
+	billingMode := core.BILLING_MODE_PAY_PER_REQUEST
 	readCapacity := 0
 	writeCapacity := 0
-	if meta.BillingMode == BILLING_MODE_PROVISIONED {
-		billingMode = BILLING_MODE_PROVISIONED
+	if meta.BillingMode == core.BILLING_MODE_PROVISIONED {
+		billingMode = core.BILLING_MODE_PROVISIONED
 		// For an item up to 4 KB, one read capacity unit (RCU) represents one strongly consistent read operation per
 		// second, or two eventually consistent read operations per second.
 		// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/provisioned-capacity-mode.html#read-write-capacity-units
@@ -235,7 +238,7 @@ func (s *InnerStorage) BeginTxn(readOnly bool) (*Txn, error) {
 type PutRequest struct {
 	Entry     *core.Entry
 	TableName string
-	Condition *Condition
+	Condition *condition.Condition
 }
 
 func (s *InnerStorage) Put(req *PutRequest) error {
@@ -256,9 +259,9 @@ func (s *InnerStorage) Put(req *PutRequest) error {
 
 type UpdateRequest struct {
 	Key             *core.Entry
-	UpdateOperation *UpdateOperation
+	UpdateOperation *update.UpdateOperation
 	TableName       string
-	Condition       *Condition
+	Condition       *condition.Condition
 }
 
 func (s *InnerStorage) Update(req *UpdateRequest) (*UpdateResponse, error) {
@@ -288,7 +291,7 @@ func (s *InnerStorage) UpdateWithTransaction(req *UpdateRequest, txn *Txn) (*Upd
 		return nil, fmt.Errorf("table %s not found", req.TableName)
 	}
 
-	if tableMetadata.billingMode == BILLING_MODE_PROVISIONED {
+	if tableMetadata.billingMode == core.BILLING_MODE_PROVISIONED {
 		if !tableMetadata.writeRateLimiter.AllowN(time.Now(), 1) {
 			return nil, RateLimitReachedError
 		}
@@ -350,7 +353,7 @@ func (s *InnerStorage) UpdateWithTransaction(req *UpdateRequest, txn *Txn) (*Upd
 type DeleteRequest struct {
 	Entry     *core.Entry
 	TableName string
-	Condition *Condition
+	Condition *condition.Condition
 }
 
 func (s *InnerStorage) Delete(req *DeleteRequest) error {
@@ -375,7 +378,7 @@ func (s *InnerStorage) DeleteWithTransaction(req *DeleteRequest, txn *Txn) error
 		return fmt.Errorf("table %s not found", req.TableName)
 	}
 
-	if tableMetadata.billingMode == BILLING_MODE_PROVISIONED {
+	if tableMetadata.billingMode == core.BILLING_MODE_PROVISIONED {
 		if !tableMetadata.writeRateLimiter.AllowN(time.Now(), 1) {
 			return RateLimitReachedError
 		}
@@ -395,7 +398,7 @@ func (s *InnerStorage) PutWithTransaction(req *PutRequest, txn *Txn) error {
 		return fmt.Errorf("table %s not found", req.TableName)
 	}
 
-	if tableMetadata.billingMode == BILLING_MODE_PROVISIONED {
+	if tableMetadata.billingMode == core.BILLING_MODE_PROVISIONED {
 		if !tableMetadata.writeRateLimiter.AllowN(time.Now(), 1) {
 			return RateLimitReachedError
 		}
@@ -423,7 +426,7 @@ func (e *ConditionalCheckFailedException) Error() string {
 	return e.Message
 }
 
-func (s *InnerStorage) put(entry *EntryWrapper, table *InnerTableMetadata, condition *Condition, txn *sql.Tx) error {
+func (s *InnerStorage) put(entry *EntryWrapper, table *InnerTableMetadata, condition *condition.Condition, txn *sql.Tx) error {
 	primaryKey, err := s.buildTablePrimaryKey(entry.Entry, table)
 	if err != nil {
 		return err
@@ -642,16 +645,16 @@ func (s *InnerStorage) newGsiEntry(entry *EntryWrapper, gsi InnerTableGlobalSeco
 	}
 
 	switch gsi.ProjectionType {
-	case PROJECTION_TYPE_ALL:
+	case core.PROJECTION_TYPE_ALL:
 		gsiEntry.Body = entry.Entry.Body
-	case PROJECTION_TYPE_INCLUDE:
+	case core.PROJECTION_TYPE_INCLUDE:
 		for _, attr := range gsi.NonKeyAttributes {
 			if val, ok := entry.Entry.Body[attr]; ok {
 				gsiEntry.Body[attr] = val
 			}
 		}
 
-	case PROJECTION_TYPE_KEYS_ONLY:
+	case core.PROJECTION_TYPE_KEYS_ONLY:
 		// do nothing
 
 	}
@@ -686,7 +689,7 @@ func (s *InnerStorage) GetWithTransaction(req *GetRequest, txn *Txn) (*core.Entr
 		return nil, fmt.Errorf("table %s not found", req.TableName)
 	}
 
-	if tableMetadata.billingMode == BILLING_MODE_PROVISIONED {
+	if tableMetadata.billingMode == core.BILLING_MODE_PROVISIONED {
 		n := 1
 		if req.ConsistentRead {
 			n = 2
@@ -721,7 +724,7 @@ var (
 	RateLimitReachedError = errors.New("rate limit reached")
 )
 
-func (s *InnerStorage) Query(req *Query) (*QueryResponse, error) {
+func (s *InnerStorage) Query(req *query.Query) (*QueryResponse, error) {
 	s.rwMutex.RLock()
 	defer s.rwMutex.RUnlock()
 
@@ -785,7 +788,7 @@ func (s *InnerStorage) Query(req *Query) (*QueryResponse, error) {
 			return nil, err
 		}
 
-		if tableMetadata.billingMode == BILLING_MODE_PROVISIONED {
+		if tableMetadata.billingMode == core.BILLING_MODE_PROVISIONED {
 			n := 1
 			if req.ConsistentRead {
 				n = 2

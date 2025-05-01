@@ -1,4 +1,4 @@
-package ddb
+package inner_storage
 
 import (
 	"errors"
@@ -6,14 +6,16 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/ocowchun/baddb/ddb/core"
+	"github.com/ocowchun/baddb/ddb/query"
+	"github.com/ocowchun/baddb/ddb/update"
 	"testing"
 )
 
-func createTestInnerStorageWithGSI(gsiSettings []GlobalSecondaryIndexSetting) *InnerStorage {
+func createTestInnerStorageWithGSI(gsiSettings []core.GlobalSecondaryIndexSetting) *InnerStorage {
 	return createTestInnerStorage(
 		0,
 		0,
-		BILLING_MODE_PAY_PER_REQUEST,
+		core.BILLING_MODE_PAY_PER_REQUEST,
 		gsiSettings,
 	)
 }
@@ -21,17 +23,17 @@ func createTestInnerStorageWithGSI(gsiSettings []GlobalSecondaryIndexSetting) *I
 func createTestInnerStorage(
 	ReadCapacityUnits int64,
 	WriteCapacityUnits int64,
-	mode BillingMode,
-	gsiSettings []GlobalSecondaryIndexSetting,
+	mode core.BillingMode,
+	gsiSettings []core.GlobalSecondaryIndexSetting,
 ) *InnerStorage {
 	storage := NewInnerStorage()
-	tableMetaData := &TableMetaData{
+	tableMetaData := &core.TableMetaData{
 		Name:                         "test",
 		GlobalSecondaryIndexSettings: gsiSettings,
-		PartitionKeySchema: &KeySchema{
+		PartitionKeySchema: &core.KeySchema{
 			AttributeName: "partitionKey",
 		},
-		SortKeySchema: &KeySchema{
+		SortKeySchema: &core.KeySchema{
 			AttributeName: "sortKey",
 		},
 		BillingMode: mode,
@@ -50,13 +52,13 @@ func createTestInnerStorage(
 
 func TestInnerStorageQueryWithGsiProjections(t *testing.T) {
 	type testCase struct {
-		projectionType ProjectionType
+		projectionType core.ProjectionType
 		attributeNames []string
 	}
 
 	testCases := []testCase{
 		{
-			projectionType: PROJECTION_TYPE_KEYS_ONLY,
+			projectionType: core.PROJECTION_TYPE_KEYS_ONLY,
 			attributeNames: []string{
 				"partitionKey",
 				"sortKey",
@@ -65,7 +67,7 @@ func TestInnerStorageQueryWithGsiProjections(t *testing.T) {
 			},
 		},
 		{
-			projectionType: PROJECTION_TYPE_INCLUDE,
+			projectionType: core.PROJECTION_TYPE_INCLUDE,
 			attributeNames: []string{
 				"partitionKey",
 				"sortKey",
@@ -75,7 +77,7 @@ func TestInnerStorageQueryWithGsiProjections(t *testing.T) {
 			},
 		},
 		{
-			projectionType: PROJECTION_TYPE_ALL,
+			projectionType: core.PROJECTION_TYPE_ALL,
 			attributeNames: []string{
 				"partitionKey",
 				"sortKey",
@@ -92,7 +94,7 @@ func TestInnerStorageQueryWithGsiProjections(t *testing.T) {
 		gsiName := "gsi1"
 		gsiPartitionKeyName := "gsi1PartitionKey"
 		gsiSortKeyName := "gsi1SortKey"
-		gsiSettings := []GlobalSecondaryIndexSetting{
+		gsiSettings := []core.GlobalSecondaryIndexSetting{
 			{
 				IndexName:        &gsiName,
 				PartitionKeyName: &gsiPartitionKeyName,
@@ -131,7 +133,7 @@ func TestInnerStorageQueryWithGsiProjections(t *testing.T) {
 
 		{
 			partitionKey := []byte(gsiPartitionKey)
-			query := &Query{
+			query := &query.Query{
 				IndexName:      &gsiName,
 				PartitionKey:   &partitionKey,
 				ConsistentRead: true,
@@ -161,7 +163,7 @@ func TestInnerStorageQueryWithGsiProjections(t *testing.T) {
 }
 
 func TestInnerStoragePutGetAndDelete(t *testing.T) {
-	storage := createTestInnerStorageWithGSI([]GlobalSecondaryIndexSetting{})
+	storage := createTestInnerStorageWithGSI([]core.GlobalSecondaryIndexSetting{})
 	body := make(map[string]core.AttributeValue)
 	partitionKey := "foo"
 	body["partitionKey"] = core.AttributeValue{S: &partitionKey}
@@ -285,8 +287,8 @@ func TestInnerStorageReadLimitReached(t *testing.T) {
 	storage := createTestInnerStorage(
 		1,
 		1,
-		BILLING_MODE_PROVISIONED,
-		[]GlobalSecondaryIndexSetting{},
+		core.BILLING_MODE_PROVISIONED,
+		[]core.GlobalSecondaryIndexSetting{},
 	)
 	body := make(map[string]core.AttributeValue)
 	partitionKey := "foo"
@@ -333,8 +335,8 @@ func TestInnerStorageWriteLimitReached(t *testing.T) {
 	storage := createTestInnerStorage(
 		1,
 		1,
-		BILLING_MODE_PROVISIONED,
-		[]GlobalSecondaryIndexSetting{},
+		core.BILLING_MODE_PROVISIONED,
+		[]core.GlobalSecondaryIndexSetting{},
 	)
 	body := make(map[string]core.AttributeValue)
 	partitionKey := "foo"
@@ -394,7 +396,7 @@ func assertEntry(actual *core.Entry, expected *core.Entry, t *testing.T) {
 }
 
 func TestInnerStorageQuery(t *testing.T) {
-	storage := createTestInnerStorageWithGSI([]GlobalSecondaryIndexSetting{})
+	storage := createTestInnerStorageWithGSI([]core.GlobalSecondaryIndexSetting{})
 	count := 4
 	i := 0
 	expectedEntries := make([]*core.Entry, count)
@@ -425,7 +427,7 @@ func TestInnerStorageQuery(t *testing.T) {
 	{
 
 		partitionKey := []byte("foo")
-		req := &Query{
+		req := &query.Query{
 			PartitionKey:     &partitionKey,
 			ScanIndexForward: true,
 			Limit:            2,
@@ -447,7 +449,7 @@ func TestInnerStorageQuery(t *testing.T) {
 	// Test query with ScanIndexForward false
 	{
 		partitionKey := []byte("foo")
-		req := &Query{
+		req := &query.Query{
 			PartitionKey:     &partitionKey,
 			ScanIndexForward: false,
 			Limit:            2,
@@ -470,7 +472,7 @@ func TestInnerStorageQuery(t *testing.T) {
 	{
 		partitionKey := []byte("foo")
 		exclusiveSortKey := []byte("foo|bar1")
-		req := &Query{
+		req := &query.Query{
 			PartitionKey:      &partitionKey,
 			ScanIndexForward:  true,
 			Limit:             2,
@@ -500,12 +502,12 @@ func TestInnerStorageQuery(t *testing.T) {
 			}
 			return *sortKey.S == "bar2", nil
 		}
-		req := &Query{
+		req := &query.Query{
 			PartitionKey:     &partitionKey,
 			ScanIndexForward: true,
 			Limit:            2,
 			ConsistentRead:   true,
-			SortKeyPredicate: (*Predicate)(&sortKeyPredicate),
+			SortKeyPredicate: (*query.Predicate)(&sortKeyPredicate),
 			TableName:        "test",
 		}
 
@@ -526,11 +528,11 @@ func TestInnerStorageQuery(t *testing.T) {
 func TestInnerStorageQueryWithGsiNoSortKey(t *testing.T) {
 	gsiName := "gsi1"
 	gsiPartitionKeyName := "gsi1PartitionKey"
-	gsiSettings := []GlobalSecondaryIndexSetting{
+	gsiSettings := []core.GlobalSecondaryIndexSetting{
 		{
 			IndexName:        &gsiName,
 			PartitionKeyName: &gsiPartitionKeyName,
-			ProjectionType:   PROJECTION_TYPE_ALL,
+			ProjectionType:   core.PROJECTION_TYPE_ALL,
 		},
 	}
 	storage := createTestInnerStorageWithGSI(gsiSettings)
@@ -568,7 +570,7 @@ func TestInnerStorageQueryWithGsiNoSortKey(t *testing.T) {
 	{
 
 		partitionKey := []byte("gsiFoo")
-		req := &Query{
+		req := &query.Query{
 			IndexName:        &gsiName,
 			PartitionKey:     &partitionKey,
 			ScanIndexForward: true,
@@ -593,12 +595,12 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 	gsiName := "gsi1"
 	gsiPartitionKeyName := "gsi1PartitionKey"
 	gsiSortKeyName := "gsi1SortKey"
-	gsiSettings := []GlobalSecondaryIndexSetting{
+	gsiSettings := []core.GlobalSecondaryIndexSetting{
 		{
 			IndexName:        &gsiName,
 			PartitionKeyName: &gsiPartitionKeyName,
 			SortKeyName:      &gsiSortKeyName,
-			ProjectionType:   PROJECTION_TYPE_ALL,
+			ProjectionType:   core.PROJECTION_TYPE_ALL,
 		},
 	}
 	storage := createTestInnerStorageWithGSI(gsiSettings)
@@ -636,7 +638,7 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 	{
 
 		partitionKey := []byte("gsiFoo")
-		req := &Query{
+		req := &query.Query{
 			IndexName:        &gsiName,
 			PartitionKey:     &partitionKey,
 			ScanIndexForward: true,
@@ -659,7 +661,7 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 	// Test query with ScanIndexForward false
 	{
 		partitionKey := []byte("gsiFoo")
-		req := &Query{
+		req := &query.Query{
 			IndexName:        &gsiName,
 			PartitionKey:     &partitionKey,
 			ScanIndexForward: false,
@@ -683,7 +685,7 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 	{
 		partitionKey := []byte("gsiFoo")
 		exclusiveSortKey := []byte("foo|bar1")
-		req := &Query{
+		req := &query.Query{
 			IndexName:         &gsiName,
 			PartitionKey:      &partitionKey,
 			ScanIndexForward:  true,
@@ -714,13 +716,13 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 			}
 			return *sortKey.S == "gsiBar2", nil
 		}
-		req := &Query{
+		req := &query.Query{
 			IndexName:        &gsiName,
 			PartitionKey:     &partitionKey,
 			ScanIndexForward: true,
 			Limit:            2,
 			ConsistentRead:   true,
-			SortKeyPredicate: (*Predicate)(&sortKeyPredicate),
+			SortKeyPredicate: (*query.Predicate)(&sortKeyPredicate),
 			TableName:        "test",
 		}
 
@@ -738,7 +740,7 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 }
 
 func TestInnerStorageUpdate(t *testing.T) {
-	storage := createTestInnerStorageWithGSI([]GlobalSecondaryIndexSetting{})
+	storage := createTestInnerStorageWithGSI([]core.GlobalSecondaryIndexSetting{})
 	tableName := "test"
 
 	partitionKey := "foo"
@@ -855,7 +857,7 @@ func TestInnerStorageUpdate(t *testing.T) {
 				Body: body,
 			}
 
-			operation, err := BuildUpdateOperation(
+			operation, err := update.BuildUpdateOperation(
 				tt.updateExpressionContent,
 				tt.expressionAttributeNames,
 				tt.expressionAttributeValues,
@@ -894,7 +896,7 @@ func TestInnerStorageUpdate(t *testing.T) {
 }
 
 func TestInnerStorageQueryItemCount(t *testing.T) {
-	storage := createTestInnerStorageWithGSI([]GlobalSecondaryIndexSetting{})
+	storage := createTestInnerStorageWithGSI([]core.GlobalSecondaryIndexSetting{})
 	tableName := "test"
 
 	// Insert items

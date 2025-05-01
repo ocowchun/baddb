@@ -1,4 +1,4 @@
-package ddb
+package inner_storage
 
 import (
 	"bytes"

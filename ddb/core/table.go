@@ -1,4 +1,4 @@
-package ddb
+package core
 
 import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
@@ -21,13 +21,6 @@ type TableMetaData struct {
 	SortKeySchema                *KeySchema
 	BillingMode                  BillingMode
 }
-
-type BillingMode uint8
-
-const (
-	BILLING_MODE_PROVISIONED BillingMode = iota
-	BILLING_MODE_PAY_PER_REQUEST
-)
 
 func (m *TableMetaData) Description(itemCount int64) *types.TableDescription {
 	tableSizeBytes := itemCount * 100
@@ -110,20 +103,4 @@ func (m *TableMetaData) Description(itemCount int64) *types.TableDescription {
 	}
 
 	return tableDescription
-}
-
-type ProjectionType uint8
-
-const (
-	PROJECTION_TYPE_KEYS_ONLY ProjectionType = iota
-	PROJECTION_TYPE_INCLUDE
-	PROJECTION_TYPE_ALL
-)
-
-type GlobalSecondaryIndexSetting struct {
-	IndexName        *string
-	PartitionKeyName *string
-	SortKeyName      *string
-	NonKeyAttributes []string
-	ProjectionType   ProjectionType
 }
