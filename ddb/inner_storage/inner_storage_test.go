@@ -133,7 +133,7 @@ func TestInnerStorageQueryWithGsiProjections(t *testing.T) {
 
 		{
 			partitionKey := []byte(gsiPartitionKey)
-			query := &query.Query{
+			q := &query.Query{
 				IndexName:      &gsiName,
 				PartitionKey:   &partitionKey,
 				ConsistentRead: true,
@@ -141,7 +141,7 @@ func TestInnerStorageQueryWithGsiProjections(t *testing.T) {
 				TableName:      "test",
 			}
 
-			res, err := storage.Query(query)
+			res, err := storage.Query(q)
 
 			if err != nil {
 				t.Fatalf("Query failed: %v", err)
@@ -159,6 +159,17 @@ func TestInnerStorageQueryWithGsiProjections(t *testing.T) {
 			assertEntry(entries[0], expectedEntry, t)
 		}
 
+	}
+}
+
+func updateTableMetadata(storage *InnerStorage, tableName string, tableDelaySeconds int, gsiDelaySeconds int) {
+	err := storage.updateTableMetadata(&TableMetadata{
+		tableName:         tableName,
+		tableDelaySeconds: tableDelaySeconds,
+		gsiDelaySeconds:   gsiDelaySeconds,
+	})
+	if err != nil {
+		panic(err)
 	}
 }
 
@@ -195,6 +206,7 @@ func TestInnerStoragePutGetAndDelete(t *testing.T) {
 	}
 	assertEntry(entry2, entry, t)
 
+	updateTableMetadata(storage, "test", 5, 5)
 	getReq = &GetRequest{
 		Entry:          entry,
 		ConsistentRead: false,
@@ -422,6 +434,7 @@ func TestInnerStorageQuery(t *testing.T) {
 		expectedEntries[i] = entry
 		i += 1
 	}
+	updateTableMetadata(storage, "test", 5, 5)
 
 	// Test query with ScanIndexForward true
 	{
@@ -444,6 +457,24 @@ func TestInnerStorageQuery(t *testing.T) {
 		}
 		assertEntry(entries[0], expectedEntries[0], t)
 		assertEntry(entries[1], expectedEntries[1], t)
+
+		// when consistentRead is false
+		req2 := &query.Query{
+			PartitionKey:     &partitionKey,
+			ScanIndexForward: true,
+			Limit:            2,
+			ConsistentRead:   false,
+			TableName:        "test",
+		}
+		res2, err := storage.Query(req2)
+		if err != nil {
+			t.Fatalf("Query failed: %v", err)
+		}
+		entries2 := res2.Entries
+		if len(entries2) != 0 {
+			t.Fatalf("Query failed: expected 0 Entries but got %d", len(entries2))
+		}
+
 	}
 
 	// Test query with ScanIndexForward false
@@ -466,6 +497,23 @@ func TestInnerStorageQuery(t *testing.T) {
 		}
 		assertEntry(entries[0], expectedEntries[3], t)
 		assertEntry(entries[1], expectedEntries[2], t)
+
+		// when consistentRead is false
+		req2 := &query.Query{
+			PartitionKey:     &partitionKey,
+			ScanIndexForward: false,
+			Limit:            2,
+			ConsistentRead:   false,
+			TableName:        "test",
+		}
+		res2, err := storage.Query(req2)
+		if err != nil {
+			t.Fatalf("Query failed: %v", err)
+		}
+		entries2 := res2.Entries
+		if len(entries2) != 0 {
+			t.Fatalf("Query failed: expected 2 Entries but got %d", len(entries2))
+		}
 	}
 
 	// Test query with ExclusiveStartKey
@@ -490,6 +538,24 @@ func TestInnerStorageQuery(t *testing.T) {
 		}
 		assertEntry(entries[0], expectedEntries[2], t)
 		assertEntry(entries[1], expectedEntries[3], t)
+
+		// when consistentRead is false
+		req2 := &query.Query{
+			PartitionKey:      &partitionKey,
+			ScanIndexForward:  true,
+			Limit:             2,
+			ConsistentRead:    false,
+			ExclusiveStartKey: &exclusiveSortKey,
+			TableName:         "test",
+		}
+		res2, err := storage.Query(req2)
+		if err != nil {
+			t.Fatalf("Query failed: %v", err)
+		}
+		entries2 := res2.Entries
+		if len(entries2) != 0 {
+			t.Fatalf("Query failed: expected 0 Entries but got %d", len(entries2))
+		}
 	}
 
 	// Test query with SortKeyPredicate
@@ -518,9 +584,29 @@ func TestInnerStorageQuery(t *testing.T) {
 		}
 		entries := res.Entries
 		if len(entries) != 1 {
-			t.Fatalf("Query failed: expected 1 entry but got %d", len(entries))
+			t.Fatalf("Query failed: expected 0 entry but got %d", len(entries))
 		}
 		assertEntry(entries[0], expectedEntries[2], t)
+
+		// when consistentRead is false
+		req2 := &query.Query{
+			PartitionKey:     &partitionKey,
+			ScanIndexForward: true,
+			Limit:            2,
+			ConsistentRead:   false,
+			SortKeyPredicate: (*query.Predicate)(&sortKeyPredicate),
+			TableName:        "test",
+		}
+
+		res2, err := storage.Query(req2)
+
+		if err != nil {
+			t.Fatalf("Query failed: %v", err)
+		}
+		entries2 := res2.Entries
+		if len(entries2) != 0 {
+			t.Fatalf("Query failed: expected 0 entry but got %d", len(entries2))
+		}
 	}
 
 }
@@ -636,7 +722,7 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 
 	// Test query with ScanIndexForward true
 	{
-
+		updateTableMetadata(storage, "test", 5, 0)
 		partitionKey := []byte("gsiFoo")
 		req := &query.Query{
 			IndexName:        &gsiName,
@@ -656,10 +742,21 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 		}
 		assertEntry(entries[0], expectedEntries[0], t)
 		assertEntry(entries[1], expectedEntries[1], t)
+
+		updateTableMetadata(storage, "test", 5, 10)
+		res2, err := storage.Query(req)
+		if err != nil {
+			t.Fatalf("Query failed: %v", err)
+		}
+		entries2 := res2.Entries
+		if len(entries2) != 0 {
+			t.Fatalf("Query failed: expected 0 Entries but got %d", len(entries2))
+		}
 	}
 
 	// Test query with ScanIndexForward false
 	{
+		updateTableMetadata(storage, "test", 5, 0)
 		partitionKey := []byte("gsiFoo")
 		req := &query.Query{
 			IndexName:        &gsiName,
@@ -679,10 +776,21 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 		}
 		assertEntry(entries[0], expectedEntries[3], t)
 		assertEntry(entries[1], expectedEntries[2], t)
+
+		updateTableMetadata(storage, "test", 5, 10)
+		res2, err := storage.Query(req)
+		if err != nil {
+			t.Fatalf("Query failed: %v", err)
+		}
+		entries2 := res2.Entries
+		if len(entries2) != 0 {
+			t.Fatalf("Query failed: expected 0 Entries but got %d", len(entries2))
+		}
 	}
 
 	// Test query with ExclusiveStartKey
 	{
+		updateTableMetadata(storage, "test", 5, 0)
 		partitionKey := []byte("gsiFoo")
 		exclusiveSortKey := []byte("foo|bar1")
 		req := &query.Query{
@@ -704,10 +812,21 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 		}
 		assertEntry(entries[0], expectedEntries[2], t)
 		assertEntry(entries[1], expectedEntries[3], t)
+
+		updateTableMetadata(storage, "test", 5, 10)
+		res2, err := storage.Query(req)
+		if err != nil {
+			t.Fatalf("Query failed: %v", err)
+		}
+		entries2 := res2.Entries
+		if len(entries2) != 0 {
+			t.Fatalf("Query failed: expected 0 Entries but got %d", len(entries2))
+		}
 	}
 
 	// Test query with SortKeyPredicate
 	{
+		updateTableMetadata(storage, "test", 5, 0)
 		partitionKey := []byte("gsiFoo")
 		sortKeyPredicate := func(entry *core.Entry) (bool, error) {
 			sortKey, ok := entry.Body["gsi1SortKey"]
@@ -736,6 +855,16 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 			t.Fatalf("Query failed: expected 1 entry but got %d", len(entries))
 		}
 		assertEntry(entries[0], expectedEntries[2], t)
+
+		updateTableMetadata(storage, "test", 5, 10)
+		res2, err := storage.Query(req)
+		if err != nil {
+			t.Fatalf("Query failed: %v", err)
+		}
+		entries2 := res2.Entries
+		if len(entries2) != 0 {
+			t.Fatalf("Query failed: expected 0 Entries but got %d", len(entries2))
+		}
 	}
 }
 

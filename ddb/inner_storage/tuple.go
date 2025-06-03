@@ -22,9 +22,9 @@ func (t *Tuple) prevEntry() *core.Entry {
 	}
 }
 
-func (t *Tuple) getEntry(consistentRead bool, readTs time.Time) *core.Entry {
+func (t *Tuple) getEntry(consistentRead bool, readTs time.Time, isGsi bool) *core.Entry {
 	if len(t.Entries) == 2 {
-		if consistentRead || t.Entries[1].CreatedAt.Before(readTs) {
+		if (!isGsi && consistentRead) || t.Entries[1].CreatedAt.Before(readTs) {
 			if t.Entries[1].IsDeleted {
 				return nil
 			}
@@ -36,7 +36,7 @@ func (t *Tuple) getEntry(consistentRead bool, readTs time.Time) *core.Entry {
 			return t.Entries[0].Entry
 		}
 	} else if len(t.Entries) == 1 {
-		if consistentRead || t.Entries[0].CreatedAt.Before(readTs) {
+		if (!isGsi && consistentRead) || t.Entries[0].CreatedAt.Before(readTs) {
 			if t.Entries[0].IsDeleted {
 				return nil
 			}

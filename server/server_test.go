@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -35,10 +36,14 @@ func TestCreateAndDeleteTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
-	if len(listTablesOutput.TableNames) != 1 {
-		t.Fatalf("Expected 1 table, got %d", len(listTablesOutput.TableNames))
+	if len(listTablesOutput.TableNames) != 2 {
+		t.Fatalf("Expected 2 table, got %d", len(listTablesOutput.TableNames))
 	}
-	if listTablesOutput.TableNames[0] != "movie" {
+	sort.Strings(listTablesOutput.TableNames)
+	if listTablesOutput.TableNames[0] != "baddb_table_metadata" {
+		t.Fatalf("Expected table name %s, got %s", "baddb_table_metadata", listTablesOutput.TableNames[0])
+	}
+	if listTablesOutput.TableNames[1] != "movie" {
 		t.Fatalf("Expected table name %s, got %s", "movie", listTablesOutput.TableNames[0])
 	}
 
@@ -1128,7 +1133,21 @@ func createTable(client *dynamodb.Client) (*dynamodb.CreateTableOutput, error) {
 			WriteCapacityUnits: aws.Int64(5),
 		},
 	}
-	return client.CreateTable(context.TODO(), createTableInput)
+	output, err := client.CreateTable(context.TODO(), createTableInput)
+	if err != nil {
+		return nil, err
+	}
+
+	client.PutItem(context.TODO(), &dynamodb.PutItemInput{
+		Item: map[string]types.AttributeValue{
+			"tableName":         &types.AttributeValueMemberS{Value: "movie"},
+			"tableDelaySeconds": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", 10)},
+			"gsiDelaySeconds":   &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", 10)},
+		},
+		TableName: aws.String("baddb_table_metadata"),
+	})
+
+	return output, nil
 }
 
 func newDdbClient() *dynamodb.Client {

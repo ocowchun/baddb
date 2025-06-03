@@ -24,8 +24,11 @@ type Service struct {
 
 func NewDdbService() *Service {
 	innerStorage := inner_storage.NewInnerStorage()
+	tableMetadatas := make(map[string]*core.TableMetaData)
+	tableMetadatas[inner_storage.METADATA_TABLE_NAME] = &core.TableMetaData{}
+
 	return &Service{
-		tableMetadatas: make(map[string]*core.TableMetaData),
+		tableMetadatas: tableMetadatas,
 		storage:        innerStorage,
 	}
 }
@@ -364,8 +367,8 @@ func (svc *Service) PutItem(ctx context.Context, input *dynamodb.PutItemInput) (
 			return nil, err
 		}
 
+		//TODO: configure PutItemOutput
 		output := &dynamodb.PutItemOutput{}
-		//TODO: add PutItemOutput
 		return output, nil
 	} else {
 		msg := "Cannot do operations on a non-existent table"

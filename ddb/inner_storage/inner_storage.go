@@ -11,6 +11,7 @@ import (
 	"github.com/ocowchun/baddb/ddb/query"
 	"github.com/ocowchun/baddb/ddb/update"
 	"golang.org/x/time/rate"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -62,6 +63,8 @@ type InnerTableMetadata struct {
 	writeCapacityUnits           int
 	readRateLimiter              *rate.Limiter
 	writeRateLimiter             *rate.Limiter
+	tableDelaySeconds            int
+	gsiDelaySeconds              int
 }
 
 func NewInnerStorage() *InnerStorage {
@@ -71,12 +74,20 @@ func NewInnerStorage() *InnerStorage {
 		panic(err)
 	}
 
-	return &InnerStorage{
+	storage := &InnerStorage{
 		db:             db,
 		TableMetaDatas: make(map[string]*InnerTableMetadata),
 		counter:        atomic.Int32{},
 		syncDelay:      time.Second * 5,
 	}
+
+	return storage
+}
+
+type TableMetadata struct {
+	tableName         string
+	tableDelaySeconds int
+	gsiDelaySeconds   int
 }
 
 func (s *InnerStorage) newTableName() string {
@@ -145,7 +156,10 @@ func (s *InnerStorage) CreateTable(meta *core.TableMetaData) error {
 		writeCapacityUnits:           writeCapacity,
 		readRateLimiter:              readLimiter,
 		writeRateLimiter:             writeLimiter,
+		tableDelaySeconds:            0,
+		gsiDelaySeconds:              0,
 	}
+	fmt.Println("add innerTableMetadata", meta.Name, innerTableMetadata)
 	s.TableMetaDatas[meta.Name] = innerTableMetadata
 
 	return nil
@@ -241,12 +255,28 @@ type PutRequest struct {
 	Condition *condition.Condition
 }
 
+const METADATA_TABLE_NAME = "baddb_table_metadata"
+
 func (s *InnerStorage) Put(req *PutRequest) error {
 	txn, err := s.BeginTxn(false)
 	if err != nil {
 		return err
 	}
 	defer txn.Rollback()
+
+	if req.TableName == METADATA_TABLE_NAME {
+		tableMetadata, err := s.extractTableMetadata(req.Entry)
+		if err != nil {
+			return err
+		}
+
+		err = s.updateTableMetadata(tableMetadata)
+		if err != nil {
+			return err
+		}
+		return txn.Commit()
+
+	}
 
 	err = s.PutWithTransaction(req, txn)
 	if err != nil {
@@ -255,6 +285,54 @@ func (s *InnerStorage) Put(req *PutRequest) error {
 	}
 
 	return txn.Commit()
+}
+
+// TODO: ensure update TableMetaDatas is thread safe
+func (s *InnerStorage) extractTableMetadata(entry *core.Entry) (*TableMetadata, error) {
+	nameAttr, ok := entry.Body["tableName"]
+	if !ok {
+		return nil, fmt.Errorf("missing tableName in entry")
+	}
+	if nameAttr.S == nil {
+		return nil, fmt.Errorf("tableName should be S, but got %s", nameAttr)
+	}
+	tableName := *nameAttr.S
+
+	var err error
+	tableDelaySeconds := 0
+	if tableDelayAttr, ok := entry.Body["tableDelaySeconds"]; ok {
+		tableDelaySeconds, err = strconv.Atoi(*tableDelayAttr.N)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	gsiDelaySeconds := 0
+	if gsiDelayAttr, ok := entry.Body["gsiDelaySeconds"]; ok {
+		gsiDelaySeconds, err = strconv.Atoi(*gsiDelayAttr.N)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &TableMetadata{
+			tableName:         tableName,
+			tableDelaySeconds: tableDelaySeconds,
+			gsiDelaySeconds:   gsiDelaySeconds,
+		},
+		nil
+}
+
+func (s *InnerStorage) updateTableMetadata(tableMetadata *TableMetadata) error {
+	m, ok := s.TableMetaDatas[tableMetadata.tableName]
+	if !ok {
+		return fmt.Errorf("table %s not found", tableMetadata.tableName)
+	}
+
+	m.tableDelaySeconds = tableMetadata.tableDelaySeconds
+	m.gsiDelaySeconds = tableMetadata.gsiDelaySeconds
+
+	return nil
 }
 
 type UpdateRequest struct {
@@ -712,12 +790,24 @@ func (s *InnerStorage) GetWithTransaction(req *GetRequest, txn *Txn) (*core.Entr
 		return nil, nil
 	}
 
-	readTs := s.readTs()
-	return tuple.getEntry(req.ConsistentRead, readTs), nil
+	readTs, err := s.readTs(req.TableName, false)
+	if err != nil {
+		return nil, err
+	}
+	return tuple.getEntry(req.ConsistentRead, readTs, false), nil
 }
 
-func (s *InnerStorage) readTs() time.Time {
-	return time.Now().Add(s.syncDelay * -1)
+func (s *InnerStorage) readTs(tableName string, isGsi bool) (time.Time, error) {
+	// TODO: remove syncDelay
+
+	m := s.TableMetaDatas[tableName]
+	fmt.Println("readTs, ", tableName)
+
+	if isGsi {
+		return time.Now().Add(time.Second * time.Duration(m.gsiDelaySeconds*-1)), nil
+	} else {
+		return time.Now().Add(time.Second * time.Duration(m.tableDelaySeconds*-1)), nil
+	}
 }
 
 var (
@@ -737,6 +827,7 @@ func (s *InnerStorage) Query(req *query.Query) (*QueryResponse, error) {
 
 	tableName := tableMetadata.Name
 	rateLimiter := tableMetadata.readRateLimiter
+	isGsi := false
 	if req.IndexName != nil {
 		gsi, ok := tableMetadata.GlobalSecondaryIndexSettings[*req.IndexName]
 		if !ok {
@@ -744,6 +835,7 @@ func (s *InnerStorage) Query(req *query.Query) (*QueryResponse, error) {
 		}
 		tableName = gsi.IndexTableName
 		rateLimiter = gsi.readRateLimiter
+		isGsi = true
 	}
 
 	// Prepare the query statement
@@ -773,7 +865,18 @@ func (s *InnerStorage) Query(req *query.Query) (*QueryResponse, error) {
 	// TODO: use more proper way to get enough result
 	args = append(args, req.Limit*3)
 
-	rows, err := s.db.Query(queryStmt, args...)
+	txn, err := s.BeginTxn(true)
+	if err != nil {
+		return nil, err
+	}
+	defer txn.Rollback()
+
+	readTs, err := s.readTs(req.TableName, isGsi)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := txn.tx.Query(queryStmt, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -781,7 +884,7 @@ func (s *InnerStorage) Query(req *query.Query) (*QueryResponse, error) {
 
 	var results []*core.Entry
 	scannedCount := 0
-	readTs := s.readTs()
+
 	for rows.Next() {
 		var body []byte
 		if err := rows.Scan(&body); err != nil {
@@ -804,7 +907,7 @@ func (s *InnerStorage) Query(req *query.Query) (*QueryResponse, error) {
 			return nil, err
 		}
 
-		entry := tuple.getEntry(req.ConsistentRead, readTs)
+		entry := tuple.getEntry(req.ConsistentRead, readTs, isGsi)
 
 		if entry != nil {
 			if req.SortKeyPredicate != nil {
@@ -826,5 +929,5 @@ func (s *InnerStorage) Query(req *query.Query) (*QueryResponse, error) {
 	res.Entries = results
 	res.ScannedCount = int32(scannedCount)
 
-	return res, nil
+	return res, txn.Commit()
 }
