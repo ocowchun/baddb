@@ -186,12 +186,6 @@ func (svc *Service) BatchGetItem(ctx context.Context, input *dynamodb.BatchGetIt
 		return nil, err
 	}
 
-	// purposely not handle some item to simulate unprocessed items
-	missed := 0
-	if reqKeysCount > 2 {
-		missed = 2
-	}
-
 	responses := make(map[string][]map[string]types.AttributeValue)
 	unprocessedKeys := make(map[string]types.KeysAndAttributes)
 
@@ -206,17 +200,6 @@ func (svc *Service) BatchGetItem(ctx context.Context, input *dynamodb.BatchGetIt
 		}
 
 		for _, key := range r.Keys {
-			if missed > 0 {
-				unprocessedSummary, ok := unprocessedKeys[tableName]
-				if !ok {
-					unprocessedSummary = types.KeysAndAttributes{}
-				}
-				unprocessedSummary.Keys = append(unprocessedSummary.Keys, key)
-				unprocessedKeys[tableName] = unprocessedSummary
-				missed--
-				continue
-			}
-
 			getItemInput := &dynamodb.GetItemInput{
 				Key:                      key,
 				TableName:                &tableName,
@@ -227,6 +210,16 @@ func (svc *Service) BatchGetItem(ctx context.Context, input *dynamodb.BatchGetIt
 			}
 			item, err := svc.GetItem(ctx, getItemInput)
 			if err != nil {
+				if errors.Is(err, inner_storage.ErrUnprocessed) {
+					unprocessedSummary, ok := unprocessedKeys[tableName]
+					if !ok {
+						unprocessedSummary = types.KeysAndAttributes{}
+					}
+					unprocessedSummary.Keys = append(unprocessedSummary.Keys, key)
+					unprocessedKeys[tableName] = unprocessedSummary
+					continue
+				}
+
 				return nil, err
 			}
 
@@ -266,12 +259,6 @@ func (svc *Service) BatchWriteItem(ctx context.Context, input *dynamodb.BatchWri
 		return nil, err
 	}
 
-	// purposely not handle some item to simulate unprocessed items
-	missed := 0
-	if reqCount > 2 {
-		missed = 2
-	}
-
 	unprocessedItems := make(map[string][]types.WriteRequest)
 	for tableName, requests := range input.RequestItems {
 		_, ok := svc.tableMetadatas[tableName]
@@ -284,38 +271,34 @@ func (svc *Service) BatchWriteItem(ctx context.Context, input *dynamodb.BatchWri
 		}
 
 		for _, request := range requests {
-			if missed > 0 {
-				unprocessedSummary, ok := unprocessedItems[tableName]
-				if !ok {
-					unprocessedSummary = make([]types.WriteRequest, 0)
-				}
-				unprocessedItems[tableName] = append(unprocessedSummary, request)
-				missed--
-				continue
-			}
-
+			var err error
 			if request.PutRequest != nil {
 				putItemInput := &dynamodb.PutItemInput{
 					Item:      request.PutRequest.Item,
 					TableName: &tableName,
 				}
-				_, err := svc.PutItem(ctx, putItemInput)
-				if err != nil {
-					return nil, err
-				}
+				_, err = svc.PutItem(ctx, putItemInput)
 			} else if request.DeleteRequest != nil {
 				deleteItemInput := &dynamodb.DeleteItemInput{
 					Key:       request.DeleteRequest.Key,
 					TableName: &tableName,
 				}
-				_, err := svc.DeleteItem(ctx, deleteItemInput)
-				if err != nil {
-					return nil, err
-				}
+				_, err = svc.DeleteItem(ctx, deleteItemInput)
 			} else {
 				msg := "Invalid request"
-				err := &ValidationException{
+				err = &ValidationException{
 					Message: msg,
+				}
+			}
+
+			if err != nil {
+				if errors.Is(err, inner_storage.ErrUnprocessed) {
+					unprocessedSummary, ok := unprocessedItems[tableName]
+					if !ok {
+						unprocessedSummary = make([]types.WriteRequest, 0)
+					}
+					unprocessedItems[tableName] = append(unprocessedSummary, request)
+					continue
 				}
 				return nil, err
 			}

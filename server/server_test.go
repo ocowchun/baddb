@@ -238,6 +238,7 @@ func TestBatchGetItem(t *testing.T) {
 	}
 
 	// Test with unprocessed keys
+	updateTestTableMetadata(ddb, 60, 60, 2)
 	{
 		input := &dynamodb.BatchGetItemInput{
 			RequestItems: map[string]types.KeysAndAttributes{
@@ -319,6 +320,7 @@ func TestBatchWriteItem(t *testing.T) {
 	}
 
 	{
+		updateTestTableMetadata(ddb, 60, 60, 2)
 		requestItems := make(map[string][]types.WriteRequest)
 		requestItems["movie"] = requests[:4]
 		input := &dynamodb.BatchWriteItemInput{
@@ -1137,17 +1139,24 @@ func createTable(client *dynamodb.Client) (*dynamodb.CreateTableOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	updateTestTableMetadata(client, 60, 60, 0)
 
-	client.PutItem(context.TODO(), &dynamodb.PutItemInput{
+	return output, nil
+}
+
+func updateTestTableMetadata(client *dynamodb.Client, tableDelaySeconds int, gsiDelaySeconds int, unprocessedRequests uint32) {
+	_, err := client.PutItem(context.TODO(), &dynamodb.PutItemInput{
 		Item: map[string]types.AttributeValue{
-			"tableName":         &types.AttributeValueMemberS{Value: "movie"},
-			"tableDelaySeconds": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", 10)},
-			"gsiDelaySeconds":   &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", 10)},
+			"tableName":           &types.AttributeValueMemberS{Value: "movie"},
+			"tableDelaySeconds":   &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", tableDelaySeconds)},
+			"gsiDelaySeconds":     &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", gsiDelaySeconds)},
+			"unprocessedRequests": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", unprocessedRequests)},
 		},
 		TableName: aws.String("baddb_table_metadata"),
 	})
-
-	return output, nil
+	if err != nil {
+		panic(err)
+	}
 }
 
 func newDdbClient() *dynamodb.Client {

@@ -162,15 +162,168 @@ func TestInnerStorageQueryWithGsiProjections(t *testing.T) {
 	}
 }
 
-func updateTableMetadata(storage *InnerStorage, tableName string, tableDelaySeconds int, gsiDelaySeconds int) {
+func updateTestTableMetadata(
+	storage *InnerStorage,
+	tableName string,
+	tableDelaySeconds int,
+	gsiDelaySeconds int,
+	unprocessedRequests uint32,
+) {
 	err := storage.updateTableMetadata(&TableMetadata{
-		tableName:         tableName,
-		tableDelaySeconds: tableDelaySeconds,
-		gsiDelaySeconds:   gsiDelaySeconds,
+		tableName:           tableName,
+		tableDelaySeconds:   tableDelaySeconds,
+		gsiDelaySeconds:     gsiDelaySeconds,
+		unprocessedRequests: unprocessedRequests,
 	})
 	if err != nil {
 		panic(err)
 	}
+}
+
+func TestInnerStorageUnprocessedGet(t *testing.T) {
+	storage := createTestInnerStorageWithGSI([]core.GlobalSecondaryIndexSetting{})
+	body := make(map[string]core.AttributeValue)
+	partitionKey := "foo"
+	body["partitionKey"] = core.AttributeValue{S: &partitionKey}
+	sortKey := "bar"
+	body["sortKey"] = core.AttributeValue{S: &sortKey}
+	version := "1"
+	body["version"] = core.AttributeValue{N: &version}
+	entry := &core.Entry{
+		Body: body,
+	}
+	tableName := "test"
+
+	err := storage.Put(&PutRequest{
+		Entry:     entry,
+		TableName: tableName,
+	})
+	if err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+	{
+		getReq := &GetRequest{
+			Entry:          entry,
+			ConsistentRead: true,
+			TableName:      tableName,
+		}
+		entry2, err := storage.Get(getReq)
+		if err != nil {
+			t.Fatalf("Get failed: %v", err)
+		}
+		assertEntry(entry2, entry, t)
+	}
+
+	{
+		count := uint32(3)
+		updateTestTableMetadata(storage, "test", 5, 5, count)
+		for count > 0 {
+			getReq := &GetRequest{
+				Entry:          entry,
+				ConsistentRead: true,
+				TableName:      tableName,
+			}
+			_, err := storage.Get(getReq)
+			if err == nil || !errors.Is(err, ErrUnprocessed) {
+				t.Fatalf("expected err to be ErrUnprocessed, got %v", err)
+			}
+			count--
+		}
+	}
+
+	{
+		getReq := &GetRequest{
+			Entry:          entry,
+			ConsistentRead: true,
+			TableName:      tableName,
+		}
+		entry2, err := storage.Get(getReq)
+		if err != nil {
+			t.Fatalf("Get failed: %v", err)
+		}
+		assertEntry(entry2, entry, t)
+	}
+}
+
+func TestInnerStorageUnprocessedWrite(t *testing.T) {
+	storage := createTestInnerStorageWithGSI([]core.GlobalSecondaryIndexSetting{})
+	body := make(map[string]core.AttributeValue)
+	partitionKey := "foo"
+	body["partitionKey"] = core.AttributeValue{S: &partitionKey}
+	sortKey := "bar"
+	body["sortKey"] = core.AttributeValue{S: &sortKey}
+	version := "1"
+	body["version"] = core.AttributeValue{N: &version}
+	entry := &core.Entry{
+		Body: body,
+	}
+	tableName := "test"
+
+	{
+		count := uint32(3)
+		updateTestTableMetadata(storage, "test", 5, 5, count)
+		for count > 0 {
+			err := storage.Put(&PutRequest{
+				Entry:     entry,
+				TableName: tableName,
+			})
+			if err == nil || !errors.Is(err, ErrUnprocessed) {
+				t.Fatalf("expected err to be ErrUnprocessed, got %v", err)
+			}
+			count--
+		}
+	}
+
+	{
+		err := storage.Put(&PutRequest{
+			Entry:     entry,
+			TableName: tableName,
+		})
+		if err != nil {
+			t.Fatalf("Put failed: %v", err)
+		}
+	}
+
+	{
+		count := uint32(3)
+		updateTestTableMetadata(storage, "test", 5, 5, count)
+		for count > 0 {
+			body2 := make(map[string]core.AttributeValue)
+			body2["partitionKey"] = core.AttributeValue{S: &partitionKey}
+			body2["sortKey"] = core.AttributeValue{S: &sortKey}
+			deleteReq := &DeleteRequest{
+				Entry: &core.Entry{
+					Body: body2,
+				},
+				TableName: tableName,
+			}
+
+			err := storage.Delete(deleteReq)
+			if err == nil || !errors.Is(err, ErrUnprocessed) {
+				t.Fatalf("expected err to be ErrUnprocessed, got %v", err)
+			}
+			count--
+		}
+	}
+
+	{
+		body2 := make(map[string]core.AttributeValue)
+		body2["partitionKey"] = core.AttributeValue{S: &partitionKey}
+		body2["sortKey"] = core.AttributeValue{S: &sortKey}
+		deleteReq := &DeleteRequest{
+			Entry: &core.Entry{
+				Body: body2,
+			},
+			TableName: tableName,
+		}
+
+		err := storage.Delete(deleteReq)
+		if err != nil {
+			t.Fatalf("Delete failed: %v", err)
+		}
+
+	}
+
 }
 
 func TestInnerStoragePutGetAndDelete(t *testing.T) {
@@ -187,36 +340,41 @@ func TestInnerStoragePutGetAndDelete(t *testing.T) {
 	}
 	tableName := "test"
 
-	err := storage.Put(&PutRequest{
-		Entry:     entry,
-		TableName: "test",
-	})
-	if err != nil {
-		t.Fatalf("Put failed: %v", err)
+	{
+		err := storage.Put(&PutRequest{
+			Entry:     entry,
+			TableName: "test",
+		})
+		if err != nil {
+			t.Fatalf("Put failed: %v", err)
+		}
+
+		getReq := &GetRequest{
+			Entry:          entry,
+			ConsistentRead: true,
+			TableName:      tableName,
+		}
+		entry2, err := storage.Get(getReq)
+		if err != nil {
+			t.Fatalf("Get failed: %v", err)
+		}
+		assertEntry(entry2, entry, t)
 	}
 
-	getReq := &GetRequest{
-		Entry:          entry,
-		ConsistentRead: true,
-		TableName:      tableName,
-	}
-	entry2, err := storage.Get(getReq)
-	if err != nil {
-		t.Fatalf("Get failed: %v", err)
-	}
-	assertEntry(entry2, entry, t)
+	{
+		updateTestTableMetadata(storage, "test", 5, 5, 0)
+		getReq := &GetRequest{
+			Entry:          entry,
+			ConsistentRead: false,
+			TableName:      tableName,
+		}
+		entry3, err := storage.Get(getReq)
+		if err != nil {
+			t.Fatalf("Get failed: %v", err)
+		}
+		assertEntry(entry3, nil, t)
 
-	updateTableMetadata(storage, "test", 5, 5)
-	getReq = &GetRequest{
-		Entry:          entry,
-		ConsistentRead: false,
-		TableName:      tableName,
 	}
-	entry3, err := storage.Get(getReq)
-	if err != nil {
-		t.Fatalf("Get failed: %v", err)
-	}
-	assertEntry(entry3, nil, t)
 
 	bodyV2 := make(map[string]core.AttributeValue)
 	bodyV2["partitionKey"] = core.AttributeValue{S: &partitionKey}
@@ -226,8 +384,7 @@ func TestInnerStoragePutGetAndDelete(t *testing.T) {
 	entryV2 := &core.Entry{
 		Body: bodyV2,
 	}
-
-	err = storage.Put(&PutRequest{
+	err := storage.Put(&PutRequest{
 		Entry:     entryV2,
 		TableName: "test",
 	})
@@ -235,27 +392,33 @@ func TestInnerStoragePutGetAndDelete(t *testing.T) {
 		t.Fatalf("Put failed: %v", err)
 	}
 
-	getReq = &GetRequest{
-		Entry:          entry,
-		ConsistentRead: true,
-		TableName:      tableName,
+	// read again
+	{
+		getReq := &GetRequest{
+			Entry:          entry,
+			ConsistentRead: true,
+			TableName:      tableName,
+		}
+		entry4, err := storage.Get(getReq)
+		if err != nil {
+			t.Fatalf("Get failed: %v", err)
+		}
+		assertEntry(entry4, entryV2, t)
 	}
-	entry4, err := storage.Get(getReq)
-	if err != nil {
-		t.Fatalf("Get failed: %v", err)
-	}
-	assertEntry(entry4, entryV2, t)
 
-	getReq = &GetRequest{
-		Entry:          entry,
-		ConsistentRead: false,
-		TableName:      tableName,
+	// read again
+	{
+		getReq := &GetRequest{
+			Entry:          entry,
+			ConsistentRead: false,
+			TableName:      tableName,
+		}
+		entry5, err := storage.Get(getReq)
+		if err != nil {
+			t.Fatalf("Get failed: %v", err)
+		}
+		assertEntry(entry5, entry, t)
 	}
-	entry5, err := storage.Get(getReq)
-	if err != nil {
-		t.Fatalf("Get failed: %v", err)
-	}
-	assertEntry(entry5, entry, t)
 
 	bodyV3 := make(map[string]core.AttributeValue)
 	bodyV3["partitionKey"] = core.AttributeValue{S: &partitionKey}
@@ -272,27 +435,31 @@ func TestInnerStoragePutGetAndDelete(t *testing.T) {
 		t.Fatalf("Delete failed: %v", err)
 	}
 
-	getReq = &GetRequest{
-		Entry:          entry,
-		ConsistentRead: true,
-		TableName:      tableName,
+	{
+		getReq := &GetRequest{
+			Entry:          entry,
+			ConsistentRead: true,
+			TableName:      tableName,
+		}
+		entry6, err := storage.Get(getReq)
+		if err != nil {
+			t.Fatalf("Get failed: %v", err)
+		}
+		assertEntry(entry6, nil, t)
 	}
-	entry6, err := storage.Get(getReq)
-	if err != nil {
-		t.Fatalf("Get failed: %v", err)
-	}
-	assertEntry(entry6, nil, t)
+	{
 
-	getReq = &GetRequest{
-		Entry:          entry,
-		ConsistentRead: false,
-		TableName:      tableName,
+		getReq := &GetRequest{
+			Entry:          entry,
+			ConsistentRead: false,
+			TableName:      tableName,
+		}
+		entry7, err := storage.Get(getReq)
+		if err != nil {
+			t.Fatalf("Get failed: %v", err)
+		}
+		assertEntry(entry7, entryV2, t)
 	}
-	entry7, err := storage.Get(getReq)
-	if err != nil {
-		t.Fatalf("Get failed: %v", err)
-	}
-	assertEntry(entry7, entryV2, t)
 }
 
 func TestInnerStorageReadLimitReached(t *testing.T) {
@@ -434,7 +601,7 @@ func TestInnerStorageQuery(t *testing.T) {
 		expectedEntries[i] = entry
 		i += 1
 	}
-	updateTableMetadata(storage, "test", 5, 5)
+	updateTestTableMetadata(storage, "test", 5, 5, 0)
 
 	// Test query with ScanIndexForward true
 	{
@@ -722,7 +889,7 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 
 	// Test query with ScanIndexForward true
 	{
-		updateTableMetadata(storage, "test", 5, 0)
+		updateTestTableMetadata(storage, "test", 5, 0, 0)
 		partitionKey := []byte("gsiFoo")
 		req := &query.Query{
 			IndexName:        &gsiName,
@@ -743,7 +910,7 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 		assertEntry(entries[0], expectedEntries[0], t)
 		assertEntry(entries[1], expectedEntries[1], t)
 
-		updateTableMetadata(storage, "test", 5, 10)
+		updateTestTableMetadata(storage, "test", 5, 10, 0)
 		res2, err := storage.Query(req)
 		if err != nil {
 			t.Fatalf("Query failed: %v", err)
@@ -756,7 +923,7 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 
 	// Test query with ScanIndexForward false
 	{
-		updateTableMetadata(storage, "test", 5, 0)
+		updateTestTableMetadata(storage, "test", 5, 0, 0)
 		partitionKey := []byte("gsiFoo")
 		req := &query.Query{
 			IndexName:        &gsiName,
@@ -777,7 +944,7 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 		assertEntry(entries[0], expectedEntries[3], t)
 		assertEntry(entries[1], expectedEntries[2], t)
 
-		updateTableMetadata(storage, "test", 5, 10)
+		updateTestTableMetadata(storage, "test", 5, 10, 0)
 		res2, err := storage.Query(req)
 		if err != nil {
 			t.Fatalf("Query failed: %v", err)
@@ -790,7 +957,7 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 
 	// Test query with ExclusiveStartKey
 	{
-		updateTableMetadata(storage, "test", 5, 0)
+		updateTestTableMetadata(storage, "test", 5, 0, 0)
 		partitionKey := []byte("gsiFoo")
 		exclusiveSortKey := []byte("foo|bar1")
 		req := &query.Query{
@@ -813,7 +980,7 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 		assertEntry(entries[0], expectedEntries[2], t)
 		assertEntry(entries[1], expectedEntries[3], t)
 
-		updateTableMetadata(storage, "test", 5, 10)
+		updateTestTableMetadata(storage, "test", 5, 10, 0)
 		res2, err := storage.Query(req)
 		if err != nil {
 			t.Fatalf("Query failed: %v", err)
@@ -826,7 +993,7 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 
 	// Test query with SortKeyPredicate
 	{
-		updateTableMetadata(storage, "test", 5, 0)
+		updateTestTableMetadata(storage, "test", 5, 0, 0)
 		partitionKey := []byte("gsiFoo")
 		sortKeyPredicate := func(entry *core.Entry) (bool, error) {
 			sortKey, ok := entry.Body["gsi1SortKey"]
@@ -856,7 +1023,7 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 		}
 		assertEntry(entries[0], expectedEntries[2], t)
 
-		updateTableMetadata(storage, "test", 5, 10)
+		updateTestTableMetadata(storage, "test", 5, 10, 0)
 		res2, err := storage.Query(req)
 		if err != nil {
 			t.Fatalf("Query failed: %v", err)

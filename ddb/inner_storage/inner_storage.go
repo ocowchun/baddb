@@ -38,9 +38,6 @@ type InnerStorage struct {
 	rwMutex        sync.RWMutex
 	TableMetaDatas map[string]*InnerTableMetadata
 	counter        atomic.Int32
-
-	// simulate how long to get the latest data, if syncDelay is 5 seconds then the latest data will be available after 5 seconds
-	syncDelay time.Duration
 }
 
 type InnerTableGlobalSecondaryIndexSetting struct {
@@ -65,6 +62,7 @@ type InnerTableMetadata struct {
 	writeRateLimiter             *rate.Limiter
 	tableDelaySeconds            int
 	gsiDelaySeconds              int
+	unprocessedRequests          atomic.Uint32
 }
 
 func NewInnerStorage() *InnerStorage {
@@ -78,16 +76,16 @@ func NewInnerStorage() *InnerStorage {
 		db:             db,
 		TableMetaDatas: make(map[string]*InnerTableMetadata),
 		counter:        atomic.Int32{},
-		syncDelay:      time.Second * 5,
 	}
 
 	return storage
 }
 
 type TableMetadata struct {
-	tableName         string
-	tableDelaySeconds int
-	gsiDelaySeconds   int
+	tableName           string
+	tableDelaySeconds   int
+	gsiDelaySeconds     int
+	unprocessedRequests uint32
 }
 
 func (s *InnerStorage) newTableName() string {
@@ -140,8 +138,6 @@ func (s *InnerStorage) CreateTable(meta *core.TableMetaData) error {
 		}
 	}
 
-	//meta.ProvisionedThroughput.readCapacity
-
 	_, err := s.db.Exec(sqlStmt)
 	if err != nil {
 		return err
@@ -158,8 +154,8 @@ func (s *InnerStorage) CreateTable(meta *core.TableMetaData) error {
 		writeRateLimiter:             writeLimiter,
 		tableDelaySeconds:            0,
 		gsiDelaySeconds:              0,
+		unprocessedRequests:          atomic.Uint32{},
 	}
-	fmt.Println("add innerTableMetadata", meta.Name, innerTableMetadata)
 	s.TableMetaDatas[meta.Name] = innerTableMetadata
 
 	return nil
@@ -315,10 +311,20 @@ func (s *InnerStorage) extractTableMetadata(entry *core.Entry) (*TableMetadata, 
 		}
 	}
 
+	unprocessedRequests := uint32(0)
+	if unprocessedAttr, ok := entry.Body["unprocessedRequests"]; ok {
+		val, err := strconv.Atoi(*unprocessedAttr.N)
+		if err != nil {
+			return nil, err
+		}
+		unprocessedRequests = uint32(val)
+	}
+
 	return &TableMetadata{
-			tableName:         tableName,
-			tableDelaySeconds: tableDelaySeconds,
-			gsiDelaySeconds:   gsiDelaySeconds,
+			tableName:           tableName,
+			tableDelaySeconds:   tableDelaySeconds,
+			gsiDelaySeconds:     gsiDelaySeconds,
+			unprocessedRequests: unprocessedRequests,
 		},
 		nil
 }
@@ -331,6 +337,7 @@ func (s *InnerStorage) updateTableMetadata(tableMetadata *TableMetadata) error {
 
 	m.tableDelaySeconds = tableMetadata.tableDelaySeconds
 	m.gsiDelaySeconds = tableMetadata.gsiDelaySeconds
+	m.unprocessedRequests.Store(tableMetadata.unprocessedRequests)
 
 	return nil
 }
@@ -367,6 +374,16 @@ func (s *InnerStorage) UpdateWithTransaction(req *UpdateRequest, txn *Txn) (*Upd
 	tableMetadata, ok := s.TableMetaDatas[req.TableName]
 	if !ok {
 		return nil, fmt.Errorf("table %s not found", req.TableName)
+	}
+
+	for {
+		count := tableMetadata.unprocessedRequests.Load()
+		if count == 0 {
+			break
+		}
+		if tableMetadata.unprocessedRequests.CompareAndSwap(count, count-1) {
+			return nil, ErrUnprocessed
+		}
 	}
 
 	if tableMetadata.billingMode == core.BILLING_MODE_PROVISIONED {
@@ -456,6 +473,16 @@ func (s *InnerStorage) DeleteWithTransaction(req *DeleteRequest, txn *Txn) error
 		return fmt.Errorf("table %s not found", req.TableName)
 	}
 
+	for {
+		count := tableMetadata.unprocessedRequests.Load()
+		if count == 0 {
+			break
+		}
+		if tableMetadata.unprocessedRequests.CompareAndSwap(count, count-1) {
+			return ErrUnprocessed
+		}
+	}
+
 	if tableMetadata.billingMode == core.BILLING_MODE_PROVISIONED {
 		if !tableMetadata.writeRateLimiter.AllowN(time.Now(), 1) {
 			return RateLimitReachedError
@@ -474,6 +501,16 @@ func (s *InnerStorage) PutWithTransaction(req *PutRequest, txn *Txn) error {
 	tableMetadata, ok := s.TableMetaDatas[req.TableName]
 	if !ok {
 		return fmt.Errorf("table %s not found", req.TableName)
+	}
+
+	for {
+		count := tableMetadata.unprocessedRequests.Load()
+		if count == 0 {
+			break
+		}
+		if tableMetadata.unprocessedRequests.CompareAndSwap(count, count-1) {
+			return ErrUnprocessed
+		}
 	}
 
 	if tableMetadata.billingMode == core.BILLING_MODE_PROVISIONED {
@@ -761,10 +798,22 @@ func (s *InnerStorage) Get(req *GetRequest) (*core.Entry, error) {
 	return entry, txn.Commit()
 }
 
+var ErrUnprocessed = errors.New("unprocessed entry")
+
 func (s *InnerStorage) GetWithTransaction(req *GetRequest, txn *Txn) (*core.Entry, error) {
 	tableMetadata, ok := s.TableMetaDatas[req.TableName]
 	if !ok {
 		return nil, fmt.Errorf("table %s not found", req.TableName)
+	}
+
+	for {
+		count := tableMetadata.unprocessedRequests.Load()
+		if count == 0 {
+			break
+		}
+		if tableMetadata.unprocessedRequests.CompareAndSwap(count, count-1) {
+			return nil, ErrUnprocessed
+		}
 	}
 
 	if tableMetadata.billingMode == core.BILLING_MODE_PROVISIONED {
@@ -798,10 +847,7 @@ func (s *InnerStorage) GetWithTransaction(req *GetRequest, txn *Txn) (*core.Entr
 }
 
 func (s *InnerStorage) readTs(tableName string, isGsi bool) (time.Time, error) {
-	// TODO: remove syncDelay
-
 	m := s.TableMetaDatas[tableName]
-	fmt.Println("readTs, ", tableName)
 
 	if isGsi {
 		return time.Now().Add(time.Second * time.Duration(m.gsiDelaySeconds*-1)), nil

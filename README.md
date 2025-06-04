@@ -33,6 +33,11 @@ aws dynamodb put-item \
     --item '{"tableName": {"S": "MusicCollection"}, "tableDelaySeconds": {"N": "60"}, "gsiDelaySeconds": {"N": "60"}}' \
     --endpoint-url http://localhost:9527
     
+aws dynamodb put-item \
+    --table-name MusicCollection \
+    --item '{"Artist": {"S": "the Jimi Hendrix Experience"}, "SongTitle": {"S": "Little Wing"}, "AlbumTitle": {"S": "Axis: Bold as Love"}}' \
+    --endpoint-url http://localhost:9527
+    
 # see nothing if consistent-read is false and the command is called within 60 seconds after above command
 aws dynamodb get-item \
     --table-name MusicCollection \
@@ -46,4 +51,29 @@ aws dynamodb get-item \
     --key '{"Artist": {"S": "No One You Know"}, "SongTitle": {"S": "Call Me Today"}}' \
     --consistent-read \
     --endpoint-url http://localhost:9527
+```
+
+### Configure unprocessed requests
+```shell
+aws dynamodb create-table \
+    --table-name MusicCollection\
+    --attribute-definitions AttributeName=Artist,AttributeType=S AttributeName=SongTitle,AttributeType=S \
+    --key-schema AttributeName=Artist,KeyType=HASH AttributeName=SongTitle,KeyType=RANGE \
+    --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 \
+    --endpoint-url http://localhost:9527
+    
+ 
+# the next 5 get/put/update/delete will failed
+# if the batchGet/batchWrite has 6 requests, the first 5 request will return in unprocessed
+# you also need to consider retry, do the math yourself 
+aws dynamodb put-item \
+    --table-name baddb_table_metadata \
+    --item '{"tableName": {"S": "MusicCollection"}, "unprocessedRequests": {"N": "5"}}' \
+    --endpoint-url http://localhost:9527
+    
+# 
+aws dynamodb batch-write-item \
+    --request-items '{ "MusicCollection": [{"PutRequest": {"Item": {"Artist": {"S": "the Jimi Hendrix Experience"}, "SongTitle": {"S": "Little Wing"}}}}] }' \
+    --endpoint-url http://localhost:9527
+    
 ```
