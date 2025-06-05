@@ -178,7 +178,7 @@ func (svc *Service) BatchGetItem(ctx context.Context, input *dynamodb.BatchGetIt
 		reqKeysCount += len(r.Keys)
 	}
 
-	if reqKeysCount >= 100 {
+	if reqKeysCount > 100 {
 		msg := "Too many items requested for the BatchGetItem call"
 		err := &ValidationException{
 			Message: msg,
@@ -251,7 +251,7 @@ func (svc *Service) BatchWriteItem(ctx context.Context, input *dynamodb.BatchWri
 		reqCount += len(r)
 	}
 
-	if reqCount >= 25 {
+	if reqCount > 25 {
 		msg := "Too many items requested for the BatchWriteItem call"
 		err := &ValidationException{
 			Message: msg,
