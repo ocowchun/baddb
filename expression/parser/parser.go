@@ -356,6 +356,12 @@ func (p *Parser) ParseConditionExpression() (ast.ConditionExpression, error) {
 	return p.parseConditionExpression(PRECEDENCE_LOWEST)
 }
 
+// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Scan.html#Scan.FilterExpression
+// The syntax for a filter expression is identical to that of a condition expression.
+func (p *Parser) ParseScanExpression() (ast.ConditionExpression, error) {
+	return p.parseConditionExpression(PRECEDENCE_LOWEST)
+}
+
 func (p *Parser) parseConditionExpression(precedence uint8) (ast.ConditionExpression, error) {
 	var left ast.ConditionExpression
 	var err error

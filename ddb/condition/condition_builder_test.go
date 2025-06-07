@@ -1,6 +1,7 @@
 package condition
 
 import (
+	"errors"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/ocowchun/baddb/ddb/core"
 	"testing"
@@ -10,17 +11,17 @@ func TestBuildComparatorCondition(t *testing.T) {
 	entries := []*core.Entry{
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2024")},
+				"createdYear": {N: aws.String("2024")},
 			},
 		},
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2025")},
+				"createdYear": {N: aws.String("2025")},
 			},
 		},
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2026")},
+				"createdYear": {N: aws.String("2026")},
 			},
 		},
 	}
@@ -30,23 +31,23 @@ func TestBuildComparatorCondition(t *testing.T) {
 		expected []bool
 	}{
 		{
-			exp:      "year = :year",
+			exp:      "createdYear = :createdYear",
 			expected: []bool{false, true, false},
 		},
 		{
-			exp:      "year < :year",
+			exp:      "createdYear < :createdYear",
 			expected: []bool{true, false, false},
 		},
 		{
-			exp:      "year <= :year",
+			exp:      "createdYear <= :createdYear",
 			expected: []bool{true, true, false},
 		},
 		{
-			exp:      "year > :year",
+			exp:      "createdYear > :createdYear",
 			expected: []bool{false, false, true},
 		},
 		{
-			exp:      "year >= :year",
+			exp:      "createdYear >= :createdYear",
 			expected: []bool{false, true, true},
 		},
 	}
@@ -56,7 +57,7 @@ func TestBuildComparatorCondition(t *testing.T) {
 			tt.exp,
 			make(map[string]string),
 			map[string]core.AttributeValue{
-				":year": {N: aws.String("2025")},
+				":createdYear": {N: aws.String("2025")},
 			})
 		if err != nil {
 			t.Fatalf("unexpected error: %v when build condition %s", err, tt.exp)
@@ -80,22 +81,22 @@ func TestBuildBetweenCondition(t *testing.T) {
 	entries := []*core.Entry{
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2024")},
+				"createdYear": {N: aws.String("2024")},
 			},
 		},
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2025")},
+				"createdYear": {N: aws.String("2025")},
 			},
 		},
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2026")},
+				"createdYear": {N: aws.String("2026")},
 			},
 		},
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2027")},
+				"createdYear": {N: aws.String("2027")},
 			},
 		},
 	}
@@ -105,7 +106,7 @@ func TestBuildBetweenCondition(t *testing.T) {
 		expected []bool
 	}{
 		{
-			exp:      "year BETWEEN :start AND :end",
+			exp:      "createdYear BETWEEN :start AND :end",
 			expected: []bool{false, true, true, false},
 		},
 	}
@@ -139,22 +140,22 @@ func TestBuildInCondition(t *testing.T) {
 	entries := []*core.Entry{
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2024")},
+				"createdYear": {N: aws.String("2024")},
 			},
 		},
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2025")},
+				"createdYear": {N: aws.String("2025")},
 			},
 		},
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2026")},
+				"createdYear": {N: aws.String("2026")},
 			},
 		},
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2027")},
+				"createdYear": {N: aws.String("2027")},
 			},
 		},
 	}
@@ -164,7 +165,7 @@ func TestBuildInCondition(t *testing.T) {
 		expected []bool
 	}{
 		{
-			exp:      "year IN (:val1, :val2)",
+			exp:      "createdYear IN (:val1, :val2)",
 			expected: []bool{false, true, true, false},
 		},
 	}
@@ -198,17 +199,17 @@ func TestBuildFunctionCondition(t *testing.T) {
 	entries := []*core.Entry{
 		{
 			Body: map[string]core.AttributeValue{
-				"name": {S: aws.String("Alice")},
+				"fistName": {S: aws.String("Alice")},
 			},
 		},
 		{
 			Body: map[string]core.AttributeValue{
-				"name": {S: aws.String("Bob")},
+				"fistName": {S: aws.String("Bob")},
 			},
 		},
 		{
 			Body: map[string]core.AttributeValue{
-				"name": {S: aws.String("Charlie")},
+				"fistName": {S: aws.String("Charlie")},
 			},
 		},
 	}
@@ -219,7 +220,7 @@ func TestBuildFunctionCondition(t *testing.T) {
 		expected                  []bool
 	}{
 		{
-			exp:                       "attribute_exists(name)",
+			exp:                       "attribute_exists(fistName)",
 			expressionAttributeValues: map[string]core.AttributeValue{},
 			expected:                  []bool{true, true, true},
 		},
@@ -229,14 +230,14 @@ func TestBuildFunctionCondition(t *testing.T) {
 			expected:                  []bool{true, true, true},
 		},
 		{
-			exp: "begins_with(name, :prefix)",
+			exp: "begins_with(fistName, :prefix)",
 			expressionAttributeValues: map[string]core.AttributeValue{
 				":prefix": {S: aws.String("A")},
 			},
 			expected: []bool{true, false, false},
 		},
 		{
-			exp: "contains(name, :substring)",
+			exp: "contains(fistName, :substring)",
 			expressionAttributeValues: map[string]core.AttributeValue{
 				":substring": {S: aws.String("ar")},
 			},
@@ -271,20 +272,20 @@ func TestBuildAndConditionExpression(t *testing.T) {
 	entries := []*core.Entry{
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2024")},
-				"name": {S: aws.String("Bob")},
+				"createdYear": {N: aws.String("2024")},
+				"fistName":    {S: aws.String("Bob")},
 			},
 		},
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2025")},
-				"name": {S: aws.String("Bob")},
+				"createdYear": {N: aws.String("2025")},
+				"fistName":    {S: aws.String("Bob")},
 			},
 		},
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2026")},
-				"name": {S: aws.String("Charlie")},
+				"createdYear": {N: aws.String("2026")},
+				"fistName":    {S: aws.String("Charlie")},
 			},
 		},
 	}
@@ -294,15 +295,15 @@ func TestBuildAndConditionExpression(t *testing.T) {
 		expected []bool
 	}{
 		{
-			exp:      "year = :year AND name = :name",
+			exp:      "createdYear = :createdYear AND fistName = :fistName",
 			expected: []bool{false, true, false},
 		},
 		{
-			exp:      "year > :year AND name = :name",
+			exp:      "createdYear > :createdYear AND fistName = :fistName",
 			expected: []bool{false, false, false},
 		},
 		{
-			exp:      "year < :year AND name = :name",
+			exp:      "createdYear < :createdYear AND fistName = :fistName",
 			expected: []bool{true, false, false},
 		},
 	}
@@ -312,8 +313,8 @@ func TestBuildAndConditionExpression(t *testing.T) {
 			tt.exp,
 			make(map[string]string),
 			map[string]core.AttributeValue{
-				":year": {N: aws.String("2025")},
-				":name": {S: aws.String("Bob")},
+				":createdYear": {N: aws.String("2025")},
+				":fistName":    {S: aws.String("Bob")},
 			})
 		if err != nil {
 			t.Fatalf("unexpected error: %v when building condition %s", err, tt.exp)
@@ -336,20 +337,20 @@ func TestBuildOrConditionExpression(t *testing.T) {
 	entries := []*core.Entry{
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2024")},
-				"name": {S: aws.String("Alice")},
+				"createdYear": {N: aws.String("2024")},
+				"fistName":    {S: aws.String("Alice")},
 			},
 		},
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2025")},
-				"name": {S: aws.String("Bob")},
+				"createdYear": {N: aws.String("2025")},
+				"fistName":    {S: aws.String("Bob")},
 			},
 		},
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2026")},
-				"name": {S: aws.String("Charlie")},
+				"createdYear": {N: aws.String("2026")},
+				"fistName":    {S: aws.String("Charlie")},
 			},
 		},
 	}
@@ -359,7 +360,7 @@ func TestBuildOrConditionExpression(t *testing.T) {
 		expected []bool
 	}{
 		{
-			exp:      "year = :year OR name = :name",
+			exp:      "createdYear = :createdYear OR fistName = :fistName",
 			expected: []bool{true, true, false},
 		},
 	}
@@ -369,8 +370,8 @@ func TestBuildOrConditionExpression(t *testing.T) {
 			tt.exp,
 			make(map[string]string),
 			map[string]core.AttributeValue{
-				":year": {N: aws.String("2024")},
-				":name": {S: aws.String("Bob")},
+				":createdYear": {N: aws.String("2024")},
+				":fistName":    {S: aws.String("Bob")},
 			})
 		if err != nil {
 			t.Fatalf("unexpected error: %v when building condition %s", err, tt.exp)
@@ -393,17 +394,17 @@ func TestBuildNotCondition(t *testing.T) {
 	entries := []*core.Entry{
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2024")},
+				"createdYear": {N: aws.String("2024")},
 			},
 		},
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2025")},
+				"createdYear": {N: aws.String("2025")},
 			},
 		},
 		{
 			Body: map[string]core.AttributeValue{
-				"year": {N: aws.String("2026")},
+				"createdYear": {N: aws.String("2026")},
 			},
 		},
 	}
@@ -413,7 +414,7 @@ func TestBuildNotCondition(t *testing.T) {
 		expected []bool
 	}{
 		{
-			exp:      "NOT year = :year",
+			exp:      "NOT createdYear = :createdYear",
 			expected: []bool{true, false, true},
 		},
 	}
@@ -423,7 +424,7 @@ func TestBuildNotCondition(t *testing.T) {
 			tt.exp,
 			make(map[string]string),
 			map[string]core.AttributeValue{
-				":year": {N: aws.String("2025")},
+				":createdYear": {N: aws.String("2025")},
 			})
 		if err != nil {
 			t.Fatalf("unexpected error: %v when building condition %s", err, tt.exp)
@@ -439,5 +440,24 @@ func TestBuildNotCondition(t *testing.T) {
 				t.Fatalf("expected %v but got %v for condition %s", tt.expected[i], result, tt.exp)
 			}
 		}
+	}
+}
+
+func TestBuildConditionReservedWord(t *testing.T) {
+	_, err := BuildCondition(
+		"language = :language",
+		map[string]string{}, // no ExpressionAttributeNames
+		map[string]core.AttributeValue{
+			":language": {N: aws.String("English")},
+		},
+	)
+
+	var actualErr *ReservedKeywordException
+	if errors.As(err, &actualErr) {
+		if actualErr.ReservedKeyword != "language" {
+			t.Fatalf("expected reserved keyword 'language', got: %s", actualErr.ReservedKeyword)
+		}
+	} else {
+		t.Fatalf("expected reserved word error, got: %v", err)
 	}
 }

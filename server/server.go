@@ -387,6 +387,18 @@ func (svr *DdbServer) Handler(w http.ResponseWriter, req *http.Request) {
 				return encoding.EncodeTransactWriteItemsOutput(i.(*dynamodb.TransactWriteItemsOutput))
 			},
 		)
+	case "Scan":
+		genericHandler(
+			w,
+			req,
+			func(bs io.ReadCloser) (interface{}, error) { return encoding.DecodeScanInput(bs) },
+			func(ctx context.Context, input interface{}) (interface{}, error) {
+				return svr.inner.Scan(ctx, input.(*dynamodb.ScanInput))
+			},
+			func(i interface{}) ([]byte, error) {
+				return encoding.EncodeScanOutput(i.(*dynamodb.ScanOutput))
+			},
+		)
 	default:
 		w.WriteHeader(http.StatusBadRequest)
 		return

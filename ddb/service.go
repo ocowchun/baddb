@@ -10,6 +10,7 @@ import (
 	"github.com/ocowchun/baddb/ddb/core"
 	"github.com/ocowchun/baddb/ddb/inner_storage"
 	query2 "github.com/ocowchun/baddb/ddb/query"
+	"github.com/ocowchun/baddb/ddb/scan"
 	"github.com/ocowchun/baddb/ddb/update"
 	"github.com/ocowchun/baddb/expression"
 	"sync"
@@ -1008,4 +1009,85 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 	output := &dynamodb.TransactWriteItemsOutput{}
 
 	return output, nil
+}
+
+func (svc *Service) Scan(ctx context.Context, input *dynamodb.ScanInput) (*dynamodb.ScanOutput, error) {
+	// https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_Scan.html
+	svc.tableLock.RLock()
+	defer svc.tableLock.RUnlock()
+
+	tableName := *input.TableName
+	tableMetadata, ok := svc.tableMetadatas[tableName]
+	if !ok {
+		msg := "Cannot do operations on a non-existent table"
+		err := &types.ResourceNotFoundException{
+			Message: &msg,
+		}
+		return nil, err
+	}
+
+	scanReqBuilder := &scan.ScanRequestBuilder{
+		FilterExpressionStr:       input.FilterExpression,
+		ExpressionAttributeNames:  input.ExpressionAttributeNames,
+		ExpressionAttributeValues: core.NewEntryFromItem(input.ExpressionAttributeValues).Body,
+		TableMetadata:             tableMetadata,
+		ExclusiveStartKey:         input.ExclusiveStartKey,
+		ConsistentRead:            input.ConsistentRead,
+		Limit:                     input.Limit,
+		IndexName:                 input.IndexName,
+		Segment:                   input.Segment,
+		TotalSegments:             input.TotalSegments,
+	}
+	scanReq, err := scanReqBuilder.Build()
+	if err != nil {
+		return nil, &ValidationException{
+			Message: err.Error(),
+		}
+	}
+
+	res, err := svc.storage.Scan(scanReq)
+	if err != nil {
+		return nil, err
+	}
+
+	entries := res.Entries
+	items := make([]map[string]types.AttributeValue, len(entries))
+	for i, entry := range entries {
+		items[i] = core.NewItemFromEntry(entry.Body)
+	}
+	lastEvaluatedKey, err := buildLastEvaluatedKey(entries, tableMetadata)
+
+	output := &dynamodb.ScanOutput{
+		Count:            int32(len(res.Entries)),
+		ScannedCount:     res.ScannedCount,
+		LastEvaluatedKey: lastEvaluatedKey,
+		Items:            items,
+	}
+
+	// TODO: handle select,ProjectionExpression
+
+	return output, nil
+}
+
+func buildLastEvaluatedKey(entries []*core.Entry, tableMetadata *core.TableMetaData) (map[string]types.AttributeValue, error) {
+	lastEvaluatedKey := make(map[string]types.AttributeValue)
+	if len(entries) > 0 {
+		lastEntry := entries[len(entries)-1]
+		partitionKeyName := tableMetadata.PartitionKeySchema.AttributeName
+		pk, ok := lastEntry.Body[partitionKeyName]
+		if !ok {
+			return nil, fmt.Errorf("can't found partition key in last entry")
+		}
+		lastEvaluatedKey[partitionKeyName] = pk.ToDdbAttributeValue()
+		if tableMetadata.SortKeySchema != nil {
+			sortKeyName := tableMetadata.SortKeySchema.AttributeName
+			sk, ok := lastEntry.Body[sortKeyName]
+			if !ok {
+				return nil, fmt.Errorf("can't found sort key in last entry")
+			}
+			lastEvaluatedKey[sortKeyName] = sk.ToDdbAttributeValue()
+		}
+	}
+
+	return lastEvaluatedKey, nil
 }

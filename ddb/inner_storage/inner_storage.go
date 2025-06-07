@@ -9,6 +9,7 @@ import (
 	"github.com/ocowchun/baddb/ddb/condition"
 	"github.com/ocowchun/baddb/ddb/core"
 	"github.com/ocowchun/baddb/ddb/query"
+	"github.com/ocowchun/baddb/ddb/scan"
 	"github.com/ocowchun/baddb/ddb/update"
 	"golang.org/x/time/rate"
 	"strconv"
@@ -975,5 +976,121 @@ func (s *InnerStorage) Query(req *query.Query) (*QueryResponse, error) {
 	res.Entries = results
 	res.ScannedCount = int32(scannedCount)
 
+	return res, txn.Commit()
+}
+
+type ScanResponse struct {
+	Entries      []*core.Entry
+	ScannedCount int32
+}
+
+func (s *InnerStorage) Scan(req *scan.ScanRequest) (*ScanResponse, error) {
+	// TODO: refactor duplicate code with Query
+	s.rwMutex.RLock()
+	defer s.rwMutex.RUnlock()
+
+	tableMetadata, ok := s.TableMetaDatas[req.TableName]
+	if !ok {
+		return nil, fmt.Errorf("table %s not found", req.TableName)
+	}
+
+	res := &ScanResponse{}
+
+	tableName := tableMetadata.Name
+	rateLimiter := tableMetadata.readRateLimiter
+	isGsi := false
+	if req.IndexName != nil {
+		gsi, ok := tableMetadata.GlobalSecondaryIndexSettings[*req.IndexName]
+		if !ok {
+			return nil, fmt.Errorf("index %s not found", *req.IndexName)
+		}
+		tableName = gsi.IndexTableName
+		rateLimiter = gsi.readRateLimiter
+		isGsi = true
+	}
+
+	queryStmt := "SELECT body FROM " + tableName + " WHERE 1=1"
+	args := []interface{}{}
+	if req.ExclusiveStartKey != nil {
+		queryStmt += " AND primary_key > ?"
+		args = append(args, req.ExclusiveStartKey)
+	}
+
+	queryStmt += " ORDER BY primary_key"
+
+	txn, err := s.BeginTxn(true)
+	if err != nil {
+		return nil, err
+	}
+	defer txn.Rollback()
+
+	readTs, err := s.readTs(req.TableName, isGsi)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := txn.tx.Query(queryStmt, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []*core.Entry
+	scannedCount := 0
+
+	i := int32(0)
+	for rows.Next() {
+		// TODO: improve it later
+		if req.TotalSegments != nil && req.Segment != nil {
+			if i%(*req.TotalSegments) != (*req.Segment) {
+				i++
+				continue
+			}
+		}
+
+		if tableMetadata.billingMode == core.BILLING_MODE_PROVISIONED {
+			n := 1
+			if req.ConsistentRead {
+				n = 2
+			}
+			if !rateLimiter.AllowN(time.Now(), n) {
+				return nil, RateLimitReachedError
+			}
+		}
+
+		scannedCount += 1
+		var tuple Tuple
+		var body []byte
+
+		if err := rows.Scan(&body); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(body, &tuple); err != nil {
+			return nil, err
+		}
+		entry := tuple.getEntry(req.ConsistentRead, readTs, isGsi)
+
+		if entry != nil {
+			if req.Filter != nil {
+				matched, err := req.Filter.Check(entry)
+				if err != nil {
+					return nil, err
+				}
+				if !matched {
+					i++
+					continue
+				}
+			}
+
+			results = append(results, entry)
+		}
+
+		if len(results) >= req.Limit {
+			break
+		}
+		i++
+	}
+	res.Entries = results
+	res.ScannedCount = int32(scannedCount)
 	return res, txn.Commit()
 }

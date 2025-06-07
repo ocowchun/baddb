@@ -836,3 +836,74 @@ func EncodeTransactWriteItemsOutput(output *dynamodb.TransactWriteItemsOutput) (
 	bs, err := json.Marshal(output)
 	return bs, err
 }
+
+type scanInput struct {
+	TableName                 *string
+	ConsistentRead            *bool
+	ExclusiveStartKey         map[string]core.AttributeValue
+	ExpressionAttributeNames  map[string]string
+	ExpressionAttributeValues map[string]core.AttributeValue
+	FilterExpression          *string
+	IndexName                 *string
+	Limit                     *int32
+	ProjectionExpression      *string
+	ReturnConsumedCapacity    types.ReturnConsumedCapacity
+	Segment                   *int32
+	Select                    types.Select
+	TotalSegments             *int32
+}
+
+func DecodeScanInput(reader io.ReadCloser) (*dynamodb.ScanInput, error) {
+	defer func() {
+		if err := reader.Close(); err != nil {
+			log.Printf("Error closing request body: %v", err)
+		}
+	}()
+
+	var input2 scanInput
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	err = json.Unmarshal(body, &input2)
+
+	input := &dynamodb.ScanInput{
+		TableName:                 input2.TableName,
+		ConsistentRead:            input2.ConsistentRead,
+		ExclusiveStartKey:         transformToDdbMap(input2.ExclusiveStartKey),
+		ExpressionAttributeNames:  input2.ExpressionAttributeNames,
+		ExpressionAttributeValues: transformToDdbMap(input2.ExpressionAttributeValues),
+		FilterExpression:          input2.FilterExpression,
+		IndexName:                 input2.IndexName,
+		Limit:                     input2.Limit,
+		ProjectionExpression:      input2.ProjectionExpression,
+		ReturnConsumedCapacity:    input2.ReturnConsumedCapacity,
+		Segment:                   input2.Segment,
+		Select:                    input2.Select,
+		TotalSegments:             input2.TotalSegments,
+	}
+
+	return input, nil
+}
+
+type scanOutput struct {
+	Count            int32
+	Items            []map[string]core.AttributeValue
+	LastEvaluatedKey map[string]core.AttributeValue
+	ScannedCount     int32
+}
+
+func EncodeScanOutput(output *dynamodb.ScanOutput) ([]byte, error) {
+	items := make([]map[string]core.AttributeValue, len(output.Items))
+	for i, item := range output.Items {
+		items[i] = core.NewEntryFromItem(item).Body
+	}
+
+	output2 := scanOutput{
+		Count:            output.Count,
+		Items:            items,
+		LastEvaluatedKey: core.NewEntryFromItem(output.LastEvaluatedKey).Body,
+	}
+	bs, err := json.Marshal(output2)
+	return bs, err
+}

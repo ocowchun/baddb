@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/ocowchun/baddb/ddb/condition"
 	"github.com/ocowchun/baddb/ddb/core"
 	"github.com/ocowchun/baddb/ddb/query"
+	"github.com/ocowchun/baddb/ddb/scan"
 	"github.com/ocowchun/baddb/ddb/update"
 	"testing"
 )
@@ -1227,4 +1229,280 @@ func TestInnerStorageQueryItemCount(t *testing.T) {
 	if count != 5 {
 		t.Fatalf("Expected item count to be 5, but got %d", count)
 	}
+}
+
+func TestInnerStorageScan(t *testing.T) {
+	storage := createTestInnerStorageWithGSI([]core.GlobalSecondaryIndexSetting{})
+	count := 4
+	i := 0
+	expectedEntries := make([]*core.Entry, count)
+	for i < count {
+		body := make(map[string]core.AttributeValue)
+		partitionKey := "foo"
+		body["partitionKey"] = core.AttributeValue{S: &partitionKey}
+		sortKey := fmt.Sprintf("bar%d", i)
+		body["sortKey"] = core.AttributeValue{S: &sortKey}
+		version := "1"
+		body["version"] = core.AttributeValue{N: &version}
+		entry := &core.Entry{
+			Body: body,
+		}
+
+		err := storage.Put(&PutRequest{
+			Entry:     entry,
+			TableName: "test",
+		})
+		if err != nil {
+			t.Fatalf("Put failed: %v", err)
+		}
+		expectedEntries[i] = entry
+		i += 1
+	}
+	updateTestTableMetadata(storage, "test", 5, 5, 0)
+
+	{
+		// Test scan with ConsistentRead true
+		req := &scan.ScanRequest{
+			Limit:          2,
+			ConsistentRead: true,
+			TableName:      "test",
+		}
+		res, err := storage.Scan(req)
+		if err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+		entries := res.Entries
+		if len(entries) != 2 {
+			t.Fatalf("Scan failed: expected 2 Entries but got %d", len(entries))
+		}
+		assertEntry(entries[0], expectedEntries[0], t)
+		assertEntry(entries[1], expectedEntries[1], t)
+
+		// when consistentRead is false
+		req2 := &scan.ScanRequest{
+			Limit:          2,
+			ConsistentRead: false,
+			TableName:      "test",
+		}
+		res2, err := storage.Scan(req2)
+		if err != nil {
+			t.Fatalf("Query failed: %v", err)
+		}
+		entries2 := res2.Entries
+		if len(entries2) != 0 {
+			t.Fatalf("Query failed: expected 0 Entries but got %d", len(entries2))
+		}
+
+	}
+
+	// Test scan with ExclusiveStartKey
+	{
+		exclusiveSortKey := []byte("foo|bar1")
+		req := &scan.ScanRequest{
+			Limit:             2,
+			ConsistentRead:    true,
+			ExclusiveStartKey: &exclusiveSortKey,
+			TableName:         "test",
+		}
+		res, err := storage.Scan(req)
+		if err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+		entries := res.Entries
+		if len(entries) != 2 {
+			t.Fatalf("Scan failed: expected 2 Entries but got %d", len(entries))
+		}
+		assertEntry(entries[0], expectedEntries[2], t)
+		assertEntry(entries[1], expectedEntries[3], t)
+
+		// when consistentRead is false
+		req2 := &scan.ScanRequest{
+			Limit:             2,
+			ConsistentRead:    false,
+			ExclusiveStartKey: &exclusiveSortKey,
+			TableName:         "test",
+		}
+		res2, err := storage.Scan(req2)
+		if err != nil {
+			t.Fatalf("Query failed: %v", err)
+		}
+		entries2 := res2.Entries
+		if len(entries2) != 0 {
+			t.Fatalf("Query failed: expected 0 Entries but got %d", len(entries2))
+		}
+	}
+
+	// Test scan with Filter
+	{
+		filter := func(entry *core.Entry) (bool, error) {
+			sortKey, ok := entry.Body["sortKey"]
+			if !ok {
+				return false, nil
+			}
+			return *sortKey.S == "bar2", nil
+		}
+
+		req := &scan.ScanRequest{
+			Limit:          2,
+			ConsistentRead: true,
+			TableName:      "test",
+			Filter:         condition.NewCondition(filter),
+		}
+
+		res, err := storage.Scan(req)
+
+		if err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+		entries := res.Entries
+		if len(entries) != 1 {
+			t.Fatalf("Scan failed: expected 0 entry but got %d", len(entries))
+		}
+		assertEntry(entries[0], expectedEntries[2], t)
+	}
+}
+
+func TestInnerStorageScanGsi(t *testing.T) {
+	gsiName := "gsi1"
+	gsiPartitionKeyName := "gsi1PartitionKey"
+	gsiSortKeyName := "gsi1SortKey"
+	gsiSettings := []core.GlobalSecondaryIndexSetting{
+		{
+			IndexName:        &gsiName,
+			PartitionKeyName: &gsiPartitionKeyName,
+			SortKeyName:      &gsiSortKeyName,
+			ProjectionType:   core.PROJECTION_TYPE_ALL,
+		},
+	}
+	storage := createTestInnerStorageWithGSI(gsiSettings)
+	count := 4
+	i := 0
+	expectedEntries := make([]*core.Entry, count)
+	for i < count {
+		body := make(map[string]core.AttributeValue)
+		partitionKey := "foo"
+		body["partitionKey"] = core.AttributeValue{S: &partitionKey}
+		sortKey := fmt.Sprintf("bar%d", i)
+		body["sortKey"] = core.AttributeValue{S: &sortKey}
+		version := "1"
+		body["version"] = core.AttributeValue{N: &version}
+		entry := &core.Entry{
+			Body: body,
+		}
+
+		err := storage.Put(&PutRequest{
+			Entry:     entry,
+			TableName: "test",
+		})
+		if err != nil {
+			t.Fatalf("Put failed: %v", err)
+		}
+		expectedEntries[i] = entry
+		i += 1
+	}
+
+	{
+		// set gsiDelay to 100 to get 0 entries in the scan
+		updateTestTableMetadata(storage, "test", 5, 100, 0)
+		req := &scan.ScanRequest{
+			Limit:     2,
+			TableName: "test",
+			IndexName: &gsiName,
+		}
+		res, err := storage.Scan(req)
+		if err != nil {
+			t.Fatalf("Query failed: %v", err)
+		}
+		entries := res.Entries
+		if len(entries) != 0 {
+			t.Fatalf("Query failed: expected 0 Entries but got %d", len(entries))
+		}
+	}
+
+	{
+		// set gsiDelay to 0 to get the entries
+		updateTestTableMetadata(storage, "test", 5, 0, 0)
+		req := &scan.ScanRequest{
+			Limit:     2,
+			TableName: "test",
+			IndexName: &gsiName,
+		}
+		res, err := storage.Scan(req)
+		if err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+		entries := res.Entries
+		if len(entries) != 2 {
+			t.Fatalf("Scan failed: expected 2 Entries but got %d", len(entries))
+		}
+		assertEntry(entries[0], expectedEntries[0], t)
+		assertEntry(entries[1], expectedEntries[1], t)
+
+	}
+
+	//// Test scan with ExclusiveStartKey
+	//{
+	//	exclusiveSortKey := []byte("foo|bar1")
+	//	req := &scan.ScanRequest{
+	//		Limit:             2,
+	//		ConsistentRead:    true,
+	//		ExclusiveStartKey: &exclusiveSortKey,
+	//		TableName:         "test",
+	//	}
+	//	res, err := storage.Scan(req)
+	//	if err != nil {
+	//		t.Fatalf("Scan failed: %v", err)
+	//	}
+	//	entries := res.Entries
+	//	if len(entries) != 2 {
+	//		t.Fatalf("Scan failed: expected 2 Entries but got %d", len(entries))
+	//	}
+	//	assertEntry(entries[0], expectedEntries[2], t)
+	//	assertEntry(entries[1], expectedEntries[3], t)
+	//
+	//	// when consistentRead is false
+	//	req2 := &scan.ScanRequest{
+	//		Limit:             2,
+	//		ConsistentRead:    false,
+	//		ExclusiveStartKey: &exclusiveSortKey,
+	//		TableName:         "test",
+	//	}
+	//	res2, err := storage.Scan(req2)
+	//	if err != nil {
+	//		t.Fatalf("Query failed: %v", err)
+	//	}
+	//	entries2 := res2.Entries
+	//	if len(entries2) != 0 {
+	//		t.Fatalf("Query failed: expected 0 Entries but got %d", len(entries2))
+	//	}
+	//}
+	//
+	//// Test scan with Filter
+	//{
+	//	filter := func(entry *core.Entry) (bool, error) {
+	//		sortKey, ok := entry.Body["sortKey"]
+	//		if !ok {
+	//			return false, nil
+	//		}
+	//		return *sortKey.S == "bar2", nil
+	//	}
+	//
+	//	req := &scan.ScanRequest{
+	//		Limit:          2,
+	//		ConsistentRead: true,
+	//		TableName:      "test",
+	//		Filter:         condition.NewCondition(filter),
+	//	}
+	//
+	//	res, err := storage.Scan(req)
+	//
+	//	if err != nil {
+	//		t.Fatalf("Scan failed: %v", err)
+	//	}
+	//	entries := res.Entries
+	//	if len(entries) != 1 {
+	//		t.Fatalf("Scan failed: expected 0 entry but got %d", len(entries))
+	//	}
+	//	assertEntry(entries[0], expectedEntries[2], t)
+	//}
 }

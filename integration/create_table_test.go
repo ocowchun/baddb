@@ -1,13 +1,8 @@
-package server
+package integration
 
 import (
-	"context"
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"log"
-	"strings"
 	"testing"
 )
 
@@ -137,43 +132,4 @@ func compareTableDescription(ddbTableDescription *types.TableDescription, baddbT
 			log.Fatalf("ProvisionedThroughput writeCapacityUnits is different, ddb has %d but baddb has %d", *ddbTableDescription.ProvisionedThroughput.WriteCapacityUnits, *baddbTableDescription.ProvisionedThroughput.WriteCapacityUnits)
 		}
 	}
-}
-
-func cleanDdbLocal(client *dynamodb.Client) {
-	// Clean up the table
-	_, err := client.DeleteTable(context.TODO(), &dynamodb.DeleteTableInput{
-		TableName: aws.String("movie"),
-	})
-	if err != nil && !strings.Contains(err.Error(), "Cannot do operations on a non-existent table") {
-		log.Fatalf("failed to delete table from ddb-local, %v", err)
-	}
-
-}
-
-func newBaddbClient() *dynamodb.Client {
-	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion("us-west-2"))
-	if err != nil {
-		log.Fatalf("unable to load SDK config, %v", err)
-	}
-
-	// Using the Config value, create the DynamoDB client
-	client := dynamodb.NewFromConfig(cfg, func(options *dynamodb.Options) {
-		options.BaseEndpoint = aws.String("http://localhost:8080")
-	})
-
-	return client
-}
-
-func newDdbLocalClient() *dynamodb.Client {
-	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion("us-west-2"))
-	if err != nil {
-		log.Fatalf("unable to load SDK config, %v", err)
-	}
-
-	// Using the Config value, create the DynamoDB client
-	client := dynamodb.NewFromConfig(cfg, func(options *dynamodb.Options) {
-		options.BaseEndpoint = aws.String("http://localhost:8000")
-	})
-
-	return client
 }
