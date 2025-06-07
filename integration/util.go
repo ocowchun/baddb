@@ -85,8 +85,8 @@ func createTable(client *dynamodb.Client) (*dynamodb.CreateTableOutput, error) {
 			Projection: &types.Projection{ProjectionType: types.ProjectionTypeAll},
 			// TODO: add check
 			ProvisionedThroughput: &types.ProvisionedThroughput{
-				ReadCapacityUnits:  aws.Int64(5),
-				WriteCapacityUnits: aws.Int64(5),
+				ReadCapacityUnits:  aws.Int64(50),
+				WriteCapacityUnits: aws.Int64(50),
 			},
 		}},
 		TableName: aws.String("movie"),
@@ -94,8 +94,8 @@ func createTable(client *dynamodb.Client) (*dynamodb.CreateTableOutput, error) {
 
 		BillingMode: types.BillingModeProvisioned,
 		ProvisionedThroughput: &types.ProvisionedThroughput{
-			ReadCapacityUnits:  aws.Int64(5),
-			WriteCapacityUnits: aws.Int64(5),
+			ReadCapacityUnits:  aws.Int64(50),
+			WriteCapacityUnits: aws.Int64(50),
 		},
 	}
 	output, err := client.CreateTable(context.TODO(), createTableInput)

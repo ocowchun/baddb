@@ -12,6 +12,7 @@ import (
 	"github.com/ocowchun/baddb/ddb/scan"
 	"github.com/ocowchun/baddb/ddb/update"
 	"golang.org/x/time/rate"
+	"hash/fnv"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -100,7 +101,7 @@ func (s *InnerStorage) newGsiTableName() string {
 func (s *InnerStorage) CreateTable(meta *core.TableMetaData) error {
 	tableName := s.newTableName()
 	sqlStmt := `
-	create table ` + tableName + `(primary_key blob not null primary key, body blob, partition_key blob, sort_key blob);
+	create table ` + tableName + `(primary_key blob not null primary key, body blob, partition_key blob, sort_key blob, shard_id integer);
 	delete from ` + tableName + `;
 	create index idx_` + tableName + `_partiton_key_sort_key on ` + tableName + `(partition_key, sort_key);
 	`
@@ -123,7 +124,7 @@ func (s *InnerStorage) CreateTable(meta *core.TableMetaData) error {
 	for _, gsi := range meta.GlobalSecondaryIndexSettings {
 		gsiTableName := s.newGsiTableName()
 		sqlStmt += `
-		create table ` + gsiTableName + ` (primary_key blob not null primary key, body blob, main_partition_key blob, main_sort_key blob, partition_key blob, sort_key blob);
+		create table ` + gsiTableName + ` (primary_key blob not null primary key, body blob, main_partition_key blob, main_sort_key blob, partition_key blob, sort_key blob, shard_id integer);
 		delete from ` + gsiTableName + `;
 		create index idx_` + gsiTableName + `_partition_key_sort_key on ` + gsiTableName + `(partition_key, sort_key);
 		`
@@ -542,6 +543,15 @@ func (e *ConditionalCheckFailedException) Error() string {
 	return e.Message
 }
 
+// https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_Scan.html#DDB-Scan-request-TotalSegments
+const TOTAL_SEGMENTS = 1000000
+
+func buildShardId(bs []byte) int32 {
+	h := fnv.New32a()
+	h.Write(bs)
+	return int32(h.Sum32() % TOTAL_SEGMENTS) // for testing purpose, shard id is 0-999
+}
+
 func (s *InnerStorage) put(entry *EntryWrapper, table *InnerTableMetadata, condition *condition.Condition, txn *sql.Tx) error {
 	primaryKey, err := s.buildTablePrimaryKey(entry.Entry, table)
 	if err != nil {
@@ -565,7 +575,7 @@ func (s *InnerStorage) put(entry *EntryWrapper, table *InnerTableMetadata, condi
 			}
 		}
 
-		stmt, err := txn.Prepare("insert into " + table.Name + "(primary_key, body, partition_key, sort_key) values(?, ?, ?, ?)")
+		stmt, err := txn.Prepare("insert into " + table.Name + "(primary_key, body, partition_key, sort_key, shard_id) values(?, ?, ?, ?, ?)")
 
 		tuple = &Tuple{
 			Entries: make([]EntryWrapper, 0),
@@ -576,7 +586,7 @@ func (s *InnerStorage) put(entry *EntryWrapper, table *InnerTableMetadata, condi
 			return err
 		}
 
-		_, err = stmt.Exec(primaryKey.Bytes(), body, primaryKey.PartitionKey, primaryKey.SortKey)
+		_, err = stmt.Exec(primaryKey.Bytes(), body, primaryKey.PartitionKey, primaryKey.SortKey, buildShardId(primaryKey.PartitionKey))
 		if err != nil {
 			return err
 		}
@@ -697,7 +707,7 @@ func (s *InnerStorage) syncGlobalSecondaryIndices(primaryKey *PrimaryKey, entry 
 
 		if tuple == nil {
 
-			stmt, err := txn.Prepare("insert into " + tableName + "(primary_key, body, main_partition_key, main_sort_key, partition_key, sort_key) values(?, ?, ?, ?, ?, ?)")
+			stmt, err := txn.Prepare("insert into " + tableName + "(primary_key, body, main_partition_key, main_sort_key, partition_key, sort_key, shard_id) values(?, ?, ?, ?, ?, ?, ?)")
 
 			tuple = &Tuple{
 				Entries: make([]EntryWrapper, 0),
@@ -708,7 +718,7 @@ func (s *InnerStorage) syncGlobalSecondaryIndices(primaryKey *PrimaryKey, entry 
 				return err
 			}
 
-			_, err = stmt.Exec(primaryKey.Bytes(), body, primaryKey.PartitionKey, primaryKey.SortKey, gsiPartitionKey, gsiSortKey)
+			_, err = stmt.Exec(primaryKey.Bytes(), body, primaryKey.PartitionKey, primaryKey.SortKey, gsiPartitionKey, gsiSortKey, buildShardId(gsiPartitionKey))
 			if err != nil {
 				return err
 			}
@@ -718,14 +728,14 @@ func (s *InnerStorage) syncGlobalSecondaryIndices(primaryKey *PrimaryKey, entry 
 				return err
 			}
 		} else {
-			stmt, err := txn.Prepare("update " + tableName + " set body = ?, partition_key = ?, sort_key = ? where primary_key = ?")
+			stmt, err := txn.Prepare("update " + tableName + " set body = ?, partition_key = ?, sort_key = ?, shard_id = ? where primary_key = ?")
 
 			tuple.addEntry(gsiEntry)
 			body, err := json.Marshal(&tuple)
 			if err != nil {
 				return err
 			}
-			_, err = stmt.Exec(body, gsiPartitionKey, gsiSortKey, primaryKey.Bytes())
+			_, err = stmt.Exec(body, gsiPartitionKey, gsiSortKey, buildShardId(gsiPartitionKey), primaryKey.Bytes())
 			if err != nil {
 				return err
 			}
@@ -1015,6 +1025,11 @@ func (s *InnerStorage) Scan(req *scan.ScanRequest) (*ScanResponse, error) {
 		queryStmt += " AND primary_key > ?"
 		args = append(args, req.ExclusiveStartKey)
 	}
+	if req.TotalSegments != nil && req.Segment != nil {
+		queryStmt += " AND shard_id % ? = ?"
+		args = append(args, *req.TotalSegments)
+		args = append(args, *req.Segment)
+	}
 
 	queryStmt += " ORDER BY primary_key"
 
@@ -1040,14 +1055,6 @@ func (s *InnerStorage) Scan(req *scan.ScanRequest) (*ScanResponse, error) {
 
 	i := int32(0)
 	for rows.Next() {
-		// TODO: improve it later
-		if req.TotalSegments != nil && req.Segment != nil {
-			if i%(*req.TotalSegments) != (*req.Segment) {
-				i++
-				continue
-			}
-		}
-
 		if tableMetadata.billingMode == core.BILLING_MODE_PROVISIONED {
 			n := 1
 			if req.ConsistentRead {

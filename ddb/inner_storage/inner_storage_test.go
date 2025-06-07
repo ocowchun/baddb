@@ -1360,6 +1360,66 @@ func TestInnerStorageScan(t *testing.T) {
 		}
 		assertEntry(entries[0], expectedEntries[2], t)
 	}
+
+}
+
+func TestInnerStorageScanWithSegments(t *testing.T) {
+	storage := createTestInnerStorageWithGSI([]core.GlobalSecondaryIndexSetting{})
+	count := 10
+	expectedEntries := make(map[string]*core.Entry, count)
+	for i := 0; i < count; i++ {
+		body := make(map[string]core.AttributeValue)
+		partitionKey := fmt.Sprintf("foo%d", i)
+		body["partitionKey"] = core.AttributeValue{S: &partitionKey}
+		sortKey := fmt.Sprintf("bar%d", i)
+		body["sortKey"] = core.AttributeValue{S: &sortKey}
+		version := "1"
+		body["version"] = core.AttributeValue{N: &version}
+		entry := &core.Entry{Body: body}
+		err := storage.Put(&PutRequest{
+			Entry:     entry,
+			TableName: "test",
+		})
+		if err != nil {
+			t.Fatalf("Put failed: %v", err)
+		}
+		expectedEntries[partitionKey+"|"+sortKey] = entry
+	}
+
+	totalSegments := int32(3)
+	found := make(map[string]*core.Entry)
+	for segment := int32(0); segment < totalSegments; segment++ {
+		req := &scan.ScanRequest{
+			TotalSegments: &totalSegments,
+			Segment:       &segment,
+			TableName:     "test",
+			Limit:         count,
+		}
+		res, err := storage.Scan(req)
+		if err != nil {
+			t.Fatalf("Scan failed for segment %d: %v", segment, err)
+		}
+		for _, entry := range res.Entries {
+			pk := *entry.Body["partitionKey"].S
+			sk := *entry.Body["sortKey"].S
+			foundKey := pk + "|" + sk
+			if _, exists := found[foundKey]; exists {
+				t.Fatalf("Duplicate entry found for key %s in segment %d", foundKey, segment)
+			}
+			found[foundKey] = entry
+		}
+	}
+
+	if len(found) != count {
+		t.Fatalf("Expected to find %d entries, but got %d", count, len(found))
+	}
+	for k, entry := range expectedEntries {
+		actual, ok := found[k]
+		if !ok {
+			t.Fatalf("Missing entry for key %s", k)
+		}
+		assertEntry(actual, entry, t)
+	}
 }
 
 func TestInnerStorageScanGsi(t *testing.T) {

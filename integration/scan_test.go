@@ -35,6 +35,24 @@ func scanTestItems() []map[string]types.AttributeValue {
 			"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "8.8"}}},
 			"language": &types.AttributeValueMemberS{Value: "English"},
 		},
+		{
+			"year":     &types.AttributeValueMemberN{Value: "1999"},
+			"title":    &types.AttributeValueMemberS{Value: "The Matrix"},
+			"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "8.7"}}},
+			"language": &types.AttributeValueMemberS{Value: "English"},
+		},
+		{
+			"year":     &types.AttributeValueMemberN{Value: "2014"},
+			"title":    &types.AttributeValueMemberS{Value: "Interstellar"},
+			"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "8.6"}}},
+			"language": &types.AttributeValueMemberS{Value: "English"},
+		},
+		{
+			"year":     &types.AttributeValueMemberN{Value: "1994"},
+			"title":    &types.AttributeValueMemberS{Value: "Forrest Gump"},
+			"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "8.8"}}},
+			"language": &types.AttributeValueMemberS{Value: "English"},
+		},
 	}
 }
 
@@ -203,6 +221,55 @@ func TestScanBehaviorGSI(t *testing.T) {
 	if ddbErr != nil || baddbErr != nil {
 		t.Errorf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
 	}
+
+	compareScanOutput(ddbItems, baddbItems, t)
+	shutdown()
+}
+
+func TestScanBehaviorWithSegments(t *testing.T) {
+	ddbLocal := newDdbLocalClient()
+	baddb := newBaddbClient()
+	cleanDdbLocal(ddbLocal)
+	shutdown := startServer()
+
+	_, ddbErr := createTable(ddbLocal)
+	_, baddbErr := createTable(baddb)
+	if ddbErr != nil || baddbErr != nil {
+		t.Fatalf("failed to create table: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
+	}
+
+	for _, item := range scanTestItems() {
+		_, err := putItemRaw(ddbLocal, item)
+		if err != nil {
+			t.Fatalf("failed to put item in ddbLocal: %v", err)
+		}
+		_, err = putItemRaw(baddb, item)
+		if err != nil {
+			t.Fatalf("failed to put item in baddb: %v", err)
+		}
+	}
+
+	totalSegments := int32(2)
+	collectItems := func(client *dynamodb.Client) []map[string]types.AttributeValue {
+		var allItems []map[string]types.AttributeValue
+		for segment := int32(0); segment < totalSegments; segment++ {
+			input := &dynamodb.ScanInput{
+				TableName:     aws.String("movie"),
+				Segment:       &segment,
+				TotalSegments: &totalSegments,
+				Limit:         aws.Int32(2), // Set a limit to test pagination
+			}
+			items, err := scanAllPages(client, input)
+			if err != nil {
+				t.Fatalf("scan failed for segment %d: %v", segment, err)
+			}
+			allItems = append(allItems, items...)
+		}
+		return allItems
+	}
+
+	ddbItems := collectItems(ddbLocal)
+	baddbItems := collectItems(baddb)
 
 	compareScanOutput(ddbItems, baddbItems, t)
 	shutdown()
