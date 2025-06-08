@@ -994,7 +994,7 @@ type ScanResponse struct {
 	ScannedCount int32
 }
 
-func (s *InnerStorage) Scan(req *scan.ScanRequest) (*ScanResponse, error) {
+func (s *InnerStorage) Scan(req *scan.Request) (*ScanResponse, error) {
 	// TODO: refactor duplicate code with Query
 	s.rwMutex.RLock()
 	defer s.rwMutex.RUnlock()

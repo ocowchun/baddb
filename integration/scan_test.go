@@ -71,11 +71,11 @@ func TestScanBehavior(t *testing.T) {
 	for _, item := range scanTestItems() {
 		_, err := putItemRaw(ddbLocal, item)
 		if err != nil {
-			t.Fatalf("failed to put item in ddbLocal: %v", err)
+			t.Fatalf("failed to request item in ddbLocal: %v", err)
 		}
 		_, err = putItemRaw(baddb, item)
 		if err != nil {
-			t.Fatalf("failed to put item in baddb: %v", err)
+			t.Fatalf("failed to request item in baddb: %v", err)
 		}
 	}
 
@@ -110,11 +110,11 @@ func TestScanBehaviorWithFilter(t *testing.T) {
 	for _, item := range scanTestItems() {
 		_, err := putItemRaw(ddbLocal, item)
 		if err != nil {
-			t.Fatalf("failed to put item in ddbLocal: %v", err)
+			t.Fatalf("failed to request item in ddbLocal: %v", err)
 		}
 		_, err = putItemRaw(baddb, item)
 		if err != nil {
-			t.Fatalf("failed to put item in baddb: %v", err)
+			t.Fatalf("failed to request item in baddb: %v", err)
 		}
 	}
 
@@ -156,11 +156,11 @@ func TestScanBehaviorWithReservedWord(t *testing.T) {
 	for _, item := range scanTestItems() {
 		_, err := putItemRaw(ddbLocal, item)
 		if err != nil {
-			t.Fatalf("failed to put item in ddbLocal: %v", err)
+			t.Fatalf("failed to request item in ddbLocal: %v", err)
 		}
 		_, err = putItemRaw(baddb, item)
 		if err != nil {
-			t.Fatalf("failed to put item in baddb: %v", err)
+			t.Fatalf("failed to request item in baddb: %v", err)
 		}
 	}
 
@@ -201,11 +201,11 @@ func TestScanBehaviorGSI(t *testing.T) {
 	for _, item := range scanTestItems() {
 		_, err := putItemRaw(ddbLocal, item)
 		if err != nil {
-			t.Fatalf("failed to put item in ddbLocal: %v", err)
+			t.Fatalf("failed to request item in ddbLocal: %v", err)
 		}
 		_, err = putItemRaw(baddb, item)
 		if err != nil {
-			t.Fatalf("failed to put item in baddb: %v", err)
+			t.Fatalf("failed to request item in baddb: %v", err)
 		}
 	}
 
@@ -241,11 +241,11 @@ func TestScanBehaviorWithSegments(t *testing.T) {
 	for _, item := range scanTestItems() {
 		_, err := putItemRaw(ddbLocal, item)
 		if err != nil {
-			t.Fatalf("failed to put item in ddbLocal: %v", err)
+			t.Fatalf("failed to request item in ddbLocal: %v", err)
 		}
 		_, err = putItemRaw(baddb, item)
 		if err != nil {
-			t.Fatalf("failed to put item in baddb: %v", err)
+			t.Fatalf("failed to request item in baddb: %v", err)
 		}
 	}
 

@@ -10,17 +10,17 @@ import (
 	"github.com/ocowchun/baddb/ddb/core"
 	"github.com/ocowchun/baddb/ddb/inner_storage"
 	query2 "github.com/ocowchun/baddb/ddb/query"
+	"github.com/ocowchun/baddb/ddb/request"
 	"github.com/ocowchun/baddb/ddb/scan"
-	"github.com/ocowchun/baddb/ddb/update"
 	"github.com/ocowchun/baddb/expression"
 	"sync"
 	"time"
 )
 
 type Service struct {
-	tableLock      sync.RWMutex
-	tableMetadatas map[string]*core.TableMetaData
-	storage        *inner_storage.InnerStorage
+	tableLock          sync.RWMutex
+	tableMetadataStore map[string]*core.TableMetaData
+	storage            *inner_storage.InnerStorage
 }
 
 func NewDdbService() *Service {
@@ -29,8 +29,8 @@ func NewDdbService() *Service {
 	tableMetadatas[inner_storage.METADATA_TABLE_NAME] = &core.TableMetaData{}
 
 	return &Service{
-		tableMetadatas: tableMetadatas,
-		storage:        innerStorage,
+		tableMetadataStore: tableMetadatas,
+		storage:            innerStorage,
 	}
 }
 
@@ -40,7 +40,7 @@ func (svc *Service) ListTables(ctx context.Context, input *dynamodb.ListTablesIn
 
 	// TODO: implement paging
 	tableNames := make([]string, 0)
-	for tableName, _ := range svc.tableMetadatas {
+	for tableName, _ := range svc.tableMetadataStore {
 		tableNames = append(tableNames, tableName)
 	}
 	output := &dynamodb.ListTablesOutput{
@@ -56,7 +56,7 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 
 	// TODO: add more check
 	tableName := *input.TableName
-	if _, ok := svc.tableMetadatas[tableName]; ok {
+	if _, ok := svc.tableMetadataStore[tableName]; ok {
 		msg := "Cannot create preexisting table"
 		err := &types.ResourceInUseException{
 			Message: &msg,
@@ -156,7 +156,7 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 		return nil, err
 	}
 
-	svc.tableMetadatas[tableName] = meta
+	svc.tableMetadataStore[tableName] = meta
 
 	itemCount, err := svc.storage.QueryItemCount(tableName)
 	if err != nil {
@@ -191,7 +191,7 @@ func (svc *Service) BatchGetItem(ctx context.Context, input *dynamodb.BatchGetIt
 	unprocessedKeys := make(map[string]types.KeysAndAttributes)
 
 	for tableName, r := range input.RequestItems {
-		_, ok := svc.tableMetadatas[tableName]
+		_, ok := svc.tableMetadataStore[tableName]
 		if !ok {
 			msg := "Cannot do operations on a non-existent table"
 			err := &types.ResourceNotFoundException{
@@ -262,7 +262,7 @@ func (svc *Service) BatchWriteItem(ctx context.Context, input *dynamodb.BatchWri
 
 	unprocessedItems := make(map[string][]types.WriteRequest)
 	for tableName, requests := range input.RequestItems {
-		_, ok := svc.tableMetadatas[tableName]
+		_, ok := svc.tableMetadataStore[tableName]
 		if !ok {
 			msg := "Cannot do operations on a non-existent table"
 			err := &types.ResourceNotFoundException{
@@ -319,28 +319,19 @@ func (svc *Service) PutItem(ctx context.Context, input *dynamodb.PutItemInput) (
 	defer svc.tableLock.RUnlock()
 
 	tableName := *input.TableName
-	if _, ok := svc.tableMetadatas[tableName]; ok {
-		entry := core.NewEntryFromItem(input.Item)
-
-		var condition *condition2.Condition
-		var err error
-		if input.ConditionExpression != nil {
-			condition, err = condition2.BuildCondition(
-				*input.ConditionExpression,
-				input.ExpressionAttributeNames,
-				core.NewEntryFromItem(input.ExpressionAttributeValues).Body,
-			)
-			if err != nil {
-				return nil, &ValidationException{
-					Message: err.Error(),
-				}
-			}
+	if _, ok := svc.tableMetadataStore[tableName]; ok {
+		builder := &request.PutRequestBuilder{
+			ConditionExpression:       input.ConditionExpression,
+			ExpressionAttributeNames:  input.ExpressionAttributeNames,
+			ExpressionAttributeValues: input.ExpressionAttributeValues,
+			Item:                      input.Item,
+			TableName:                 input.TableName,
 		}
-
-		req := &inner_storage.PutRequest{
-			Entry:     entry,
-			TableName: tableName,
-			Condition: condition,
+		req, err := builder.Build()
+		if err != nil {
+			return nil, &ValidationException{
+				Message: err.Error(),
+			}
 		}
 		err = svc.storage.Put(req)
 		if err != nil {
@@ -368,45 +359,22 @@ func (svc *Service) UpdateItem(ctx context.Context, input *dynamodb.UpdateItemIn
 	defer svc.tableLock.RUnlock()
 
 	tableName := *input.TableName
-	if _, ok := svc.tableMetadatas[tableName]; ok {
-		if input.UpdateExpression == nil {
-			msg := "UpdateExpression must be provided"
-			err := &ValidationException{
-				Message: msg,
-			}
-			return nil, err
+	if _, ok := svc.tableMetadataStore[tableName]; ok {
+		builder := &request.UpdateRequestBuilder{
+			TableName:                 input.TableName,
+			UpdateExpression:          input.UpdateExpression,
+			ExpressionAttributeNames:  input.ExpressionAttributeNames,
+			ExpressionAttributeValues: input.ExpressionAttributeValues,
+			ConditionExpression:       input.ConditionExpression,
+			Key:                       input.Key,
 		}
-
-		updateOperation, err := update.BuildUpdateOperation(
-			*input.UpdateExpression,
-			input.ExpressionAttributeNames,
-			core.NewEntryFromItem(input.ExpressionAttributeValues).Body)
+		req, err := builder.Build()
 		if err != nil {
 			return nil, &ValidationException{
 				Message: err.Error(),
 			}
 		}
 
-		var condition *condition2.Condition
-		if input.ConditionExpression != nil {
-			condition, err = condition2.BuildCondition(
-				*input.ConditionExpression,
-				input.ExpressionAttributeNames,
-				core.NewEntryFromItem(input.ExpressionAttributeValues).Body,
-			)
-			if err != nil {
-				return nil, &ValidationException{
-					Message: err.Error(),
-				}
-			}
-		}
-
-		req := &inner_storage.UpdateRequest{
-			Key:             core.NewEntryFromItem(input.Key),
-			UpdateOperation: updateOperation,
-			TableName:       tableName,
-			Condition:       condition,
-		}
 		res, err := svc.storage.Update(req)
 		if err != nil {
 			return nil, err
@@ -433,27 +401,19 @@ func (svc *Service) DeleteItem(ctx context.Context, input *dynamodb.DeleteItemIn
 	defer svc.tableLock.RUnlock()
 
 	tableName := *input.TableName
-	if _, ok := svc.tableMetadatas[tableName]; ok {
-		var condition *condition2.Condition
-		var err error
-		if input.ConditionExpression != nil {
-			condition, err = condition2.BuildCondition(
-				*input.ConditionExpression,
-				input.ExpressionAttributeNames,
-				core.NewEntryFromItem(input.ExpressionAttributeValues).Body,
-			)
-			if err != nil {
-				return nil, &ValidationException{
-					Message: err.Error(),
-				}
-			}
+	if _, ok := svc.tableMetadataStore[tableName]; ok {
+		builder := &request.DeleteRequestBuilder{
+			TableName:                 input.TableName,
+			ConditionExpression:       input.ConditionExpression,
+			ExpressionAttributeNames:  input.ExpressionAttributeNames,
+			ExpressionAttributeValues: input.ExpressionAttributeValues,
+			Key:                       input.Key,
 		}
-
-		entry := core.NewEntryFromItem(input.Key)
-		req := &inner_storage.DeleteRequest{
-			Entry:     entry,
-			TableName: tableName,
-			Condition: condition,
+		req, err := builder.Build()
+		if err != nil {
+			return nil, &ValidationException{
+				Message: err.Error(),
+			}
 		}
 
 		err = svc.storage.Delete(req)
@@ -477,7 +437,7 @@ func (svc *Service) GetItem(ctx context.Context, input *dynamodb.GetItemInput) (
 	defer svc.tableLock.RUnlock()
 
 	tableName := *input.TableName
-	if _, ok := svc.tableMetadatas[tableName]; ok {
+	if _, ok := svc.tableMetadataStore[tableName]; ok {
 
 		consistentRead := false
 		if input.ConsistentRead != nil {
@@ -537,7 +497,7 @@ func (svc *Service) Query(ctx context.Context, input *dynamodb.QueryInput) (*dyn
 	defer svc.tableLock.RUnlock()
 
 	tableName := *input.TableName
-	tableMetadata, ok := svc.tableMetadatas[tableName]
+	tableMetadata, ok := svc.tableMetadataStore[tableName]
 	if !ok {
 		msg := "Cannot do operations on a non-existent table"
 		err := &types.ResourceNotFoundException{
@@ -626,15 +586,15 @@ func (svc *Service) DeleteTable(ctx context.Context, input *dynamodb.DeleteTable
 	defer svc.tableLock.Unlock()
 
 	tableName := *input.TableName
-	if _, ok := svc.tableMetadatas[tableName]; ok {
-		table := svc.tableMetadatas[tableName]
+	if _, ok := svc.tableMetadataStore[tableName]; ok {
+		table := svc.tableMetadataStore[tableName]
 
 		itemCount, err := svc.storage.QueryItemCount(tableName)
 		if err != nil {
 			return nil, err
 		}
 		tableDescription := table.Description(itemCount)
-		delete(svc.tableMetadatas, tableName)
+		delete(svc.tableMetadataStore, tableName)
 
 		// TODO: delete from storage
 		output := &dynamodb.DeleteTableOutput{
@@ -656,8 +616,8 @@ func (svc *Service) DescribeTable(ctx context.Context, input *dynamodb.DescribeT
 	defer svc.tableLock.RUnlock()
 
 	tableName := *input.TableName
-	if _, ok := svc.tableMetadatas[tableName]; ok {
-		table := svc.tableMetadatas[tableName]
+	if _, ok := svc.tableMetadataStore[tableName]; ok {
+		table := svc.tableMetadataStore[tableName]
 		itemCount, err := svc.storage.QueryItemCount(tableName)
 		if err != nil {
 			return nil, err
@@ -698,7 +658,7 @@ func (svc *Service) validateTransactWriteItemsInput(input *dynamodb.TransactWrit
 			conditionCheck := writeItem.ConditionCheck
 
 			tableName = *conditionCheck.TableName
-			tableMetadata, ok := svc.tableMetadatas[tableName]
+			tableMetadata, ok := svc.tableMetadataStore[tableName]
 			if !ok {
 				msg := "Cannot do operations on a non-existent table"
 				return &types.ResourceNotFoundException{
@@ -713,7 +673,7 @@ func (svc *Service) validateTransactWriteItemsInput(input *dynamodb.TransactWrit
 			put := writeItem.Put
 
 			tableName = *put.TableName
-			tableMetadata, ok := svc.tableMetadatas[tableName]
+			tableMetadata, ok := svc.tableMetadataStore[tableName]
 			if !ok {
 				msg := "Cannot do operations on a non-existent table"
 				return &types.ResourceNotFoundException{
@@ -728,7 +688,7 @@ func (svc *Service) validateTransactWriteItemsInput(input *dynamodb.TransactWrit
 			deleteReq := writeItem.Delete
 
 			tableName = *deleteReq.TableName
-			tableMetadata, ok := svc.tableMetadatas[tableName]
+			tableMetadata, ok := svc.tableMetadataStore[tableName]
 			if !ok {
 				msg := "Cannot do operations on a non-existent table"
 				return &types.ResourceNotFoundException{
@@ -743,7 +703,7 @@ func (svc *Service) validateTransactWriteItemsInput(input *dynamodb.TransactWrit
 			update := writeItem.Update
 
 			tableName = *update.TableName
-			tableMetadata, ok := svc.tableMetadatas[tableName]
+			tableMetadata, ok := svc.tableMetadataStore[tableName]
 			if !ok {
 				msg := "Cannot do operations on a non-existent table"
 				return &types.ResourceNotFoundException{
@@ -818,7 +778,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 		if writeItem.ConditionCheck != nil {
 			conditionCheck := writeItem.ConditionCheck
 			tableName := *conditionCheck.TableName
-			if _, ok := svc.tableMetadatas[tableName]; !ok {
+			if _, ok := svc.tableMetadataStore[tableName]; !ok {
 				msg := "Cannot do operations on a non-existent table"
 				err = &types.ResourceNotFoundException{
 					Message: &msg,
@@ -826,14 +786,14 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				return nil, err
 			}
 
-			var condition *condition2.Condition
+			var cond *condition2.Condition
 			if conditionCheck.ConditionExpression == nil || *conditionCheck.ConditionExpression == "" {
 				return nil, &ValidationException{
 					Message: "The expression can not be empty;",
 				}
 			}
 
-			condition, err = condition2.BuildCondition(
+			cond, err = condition2.BuildCondition(
 				*conditionCheck.ConditionExpression,
 				conditionCheck.ExpressionAttributeNames,
 				core.NewEntryFromItem(conditionCheck.ExpressionAttributeValues).Body,
@@ -860,7 +820,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 					Body: make(map[string]core.AttributeValue),
 				}
 			}
-			matched, err := condition.Check(entry)
+			matched, err := cond.Check(entry)
 
 			if err != nil {
 				return nil, err
@@ -877,33 +837,25 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 		} else if writeItem.Put != nil {
 			put := writeItem.Put
 			tableName := *put.TableName
-			if _, ok := svc.tableMetadatas[tableName]; !ok {
+			if _, ok := svc.tableMetadataStore[tableName]; !ok {
 				msg := "Cannot do operations on a non-existent table"
 				err = &types.ResourceNotFoundException{
 					Message: &msg,
 				}
 				return nil, err
 			}
-
-			var condition *condition2.Condition
-			if put.ConditionExpression != nil {
-				condition, err = condition2.BuildCondition(
-					*put.ConditionExpression,
-					put.ExpressionAttributeNames,
-					core.NewEntryFromItem(put.ExpressionAttributeValues).Body,
-				)
-				if err != nil {
-					return nil, &ValidationException{
-						Message: err.Error(),
-					}
-				}
+			builder := &request.PutRequestBuilder{
+				ConditionExpression:       put.ConditionExpression,
+				ExpressionAttributeNames:  put.ExpressionAttributeNames,
+				ExpressionAttributeValues: put.ExpressionAttributeValues,
+				Item:                      put.Item,
+				TableName:                 put.TableName,
 			}
-
-			entry := core.NewEntryFromItem(put.Item)
-			req := &inner_storage.PutRequest{
-				Entry:     entry,
-				TableName: tableName,
-				Condition: condition,
+			req, err := builder.Build()
+			if err != nil {
+				return nil, &ValidationException{
+					Message: err.Error(),
+				}
 			}
 			err = svc.storage.PutWithTransaction(req, txn)
 			if err != nil {
@@ -912,7 +864,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 		} else if writeItem.Delete != nil {
 			deleteReq := writeItem.Delete
 			tableName := *deleteReq.TableName
-			if _, ok := svc.tableMetadatas[tableName]; !ok {
+			if _, ok := svc.tableMetadataStore[tableName]; !ok {
 				msg := "Cannot do operations on a non-existent table"
 				err = &types.ResourceNotFoundException{
 					Message: &msg,
@@ -920,26 +872,20 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				return nil, err
 			}
 
-			var condition *condition2.Condition
-			if deleteReq.ConditionExpression != nil {
-				condition, err = condition2.BuildCondition(
-					*deleteReq.ConditionExpression,
-					deleteReq.ExpressionAttributeNames,
-					core.NewEntryFromItem(deleteReq.ExpressionAttributeValues).Body,
-				)
-				if err != nil {
-					return nil, &ValidationException{
-						Message: err.Error(),
-					}
+			builder := &request.DeleteRequestBuilder{
+				TableName:                 deleteReq.TableName,
+				ConditionExpression:       deleteReq.ConditionExpression,
+				ExpressionAttributeNames:  deleteReq.ExpressionAttributeNames,
+				ExpressionAttributeValues: deleteReq.ExpressionAttributeValues,
+				Key:                       deleteReq.Key,
+			}
+			req, err := builder.Build()
+			if err != nil {
+				return nil, &ValidationException{
+					Message: err.Error(),
 				}
 			}
 
-			entry := core.NewEntryFromItem(deleteReq.Key)
-			req := &inner_storage.DeleteRequest{
-				Entry:     entry,
-				TableName: tableName,
-				Condition: condition,
-			}
 			err = svc.storage.DeleteWithTransaction(req, txn)
 			if err != nil {
 				return nil, err
@@ -947,7 +893,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 		} else if writeItem.Update != nil {
 			updateReq := writeItem.Update
 			tableName := *updateReq.TableName
-			if _, ok := svc.tableMetadatas[tableName]; !ok {
+			if _, ok := svc.tableMetadataStore[tableName]; !ok {
 				msg := "Cannot do operations on a non-existent table"
 				err = &types.ResourceNotFoundException{
 					Message: &msg,
@@ -955,43 +901,19 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				return nil, err
 			}
 
-			if updateReq.UpdateExpression == nil {
-				msg := "UpdateExpression must be provided"
-				err := &ValidationException{
-					Message: msg,
-				}
-				return nil, err
+			builder := &request.UpdateRequestBuilder{
+				TableName:                 updateReq.TableName,
+				UpdateExpression:          updateReq.UpdateExpression,
+				ExpressionAttributeNames:  updateReq.ExpressionAttributeNames,
+				ExpressionAttributeValues: updateReq.ExpressionAttributeValues,
+				ConditionExpression:       updateReq.ConditionExpression,
+				Key:                       updateReq.Key,
 			}
-
-			updateOperation, err := update.BuildUpdateOperation(
-				*updateReq.UpdateExpression,
-				updateReq.ExpressionAttributeNames,
-				core.NewEntryFromItem(updateReq.ExpressionAttributeValues).Body)
+			req, err := builder.Build()
 			if err != nil {
 				return nil, &ValidationException{
 					Message: err.Error(),
 				}
-			}
-
-			var condition *condition2.Condition
-			if updateReq.ConditionExpression != nil {
-				condition, err = condition2.BuildCondition(
-					*updateReq.ConditionExpression,
-					updateReq.ExpressionAttributeNames,
-					core.NewEntryFromItem(updateReq.ExpressionAttributeValues).Body,
-				)
-				if err != nil {
-					return nil, &ValidationException{
-						Message: err.Error(),
-					}
-				}
-			}
-
-			req := &inner_storage.UpdateRequest{
-				Key:             core.NewEntryFromItem(updateReq.Key),
-				UpdateOperation: updateOperation,
-				TableName:       tableName,
-				Condition:       condition,
 			}
 
 			_, err = svc.storage.UpdateWithTransaction(req, txn)
@@ -1017,7 +939,7 @@ func (svc *Service) Scan(ctx context.Context, input *dynamodb.ScanInput) (*dynam
 	defer svc.tableLock.RUnlock()
 
 	tableName := *input.TableName
-	tableMetadata, ok := svc.tableMetadatas[tableName]
+	tableMetadata, ok := svc.tableMetadataStore[tableName]
 	if !ok {
 		msg := "Cannot do operations on a non-existent table"
 		err := &types.ResourceNotFoundException{
@@ -1026,7 +948,7 @@ func (svc *Service) Scan(ctx context.Context, input *dynamodb.ScanInput) (*dynam
 		return nil, err
 	}
 
-	scanReqBuilder := &scan.ScanRequestBuilder{
+	scanReqBuilder := &scan.RequestBuilder{
 		FilterExpressionStr:       input.FilterExpression,
 		ExpressionAttributeNames:  input.ExpressionAttributeNames,
 		ExpressionAttributeValues: core.NewEntryFromItem(input.ExpressionAttributeValues).Body,

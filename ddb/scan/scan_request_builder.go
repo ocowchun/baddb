@@ -7,7 +7,7 @@ import (
 	"github.com/ocowchun/baddb/ddb/core"
 )
 
-type ScanRequestBuilder struct {
+type RequestBuilder struct {
 	FilterExpressionStr       *string
 	ExpressionAttributeValues map[string]core.AttributeValue
 	ExpressionAttributeNames  map[string]string
@@ -20,7 +20,7 @@ type ScanRequestBuilder struct {
 	TotalSegments             *int32
 }
 
-type ScanRequest struct {
+type Request struct {
 	ConsistentRead    bool
 	ExclusiveStartKey *[]byte
 	Limit             int
@@ -39,8 +39,8 @@ func (e *InvalidFilterExpressionError) Error() string {
 	return fmt.Sprintf("Invalid FilterExpression: %v", e.rawErr)
 }
 
-func (b *ScanRequestBuilder) Build() (*ScanRequest, error) {
-	req := &ScanRequest{
+func (b *RequestBuilder) Build() (*Request, error) {
+	req := &Request{
 		ConsistentRead: b.ConsistentRead != nil && *b.ConsistentRead,
 		TableName:      b.TableMetadata.Name,
 		IndexName:      b.IndexName,

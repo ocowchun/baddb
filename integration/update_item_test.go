@@ -8,8 +8,7 @@ import (
 	"testing"
 )
 
-func TestPutItemBehavior(t *testing.T) {
-
+func TestUpdateItemBehavior(t *testing.T) {
 	tests := []struct {
 		name            string
 		condition       *string
@@ -17,25 +16,31 @@ func TestPutItemBehavior(t *testing.T) {
 		hasPreviousItem bool
 	}{
 		{
-			name:            "normal insert",
+			name:            "normal update when item does not exist",
 			condition:       nil,
 			expectErr:       false,
 			hasPreviousItem: false,
 		},
 		{
-			name:            "conditional insert success",
-			condition:       aws.String("attribute_not_exists(title)"),
+			name:            "normal update",
+			condition:       nil,
 			expectErr:       false,
-			hasPreviousItem: false,
+			hasPreviousItem: true,
 		},
 		{
-			name:            "conditional insert fails",
+			name:            "conditional update success",
+			condition:       aws.String("attribute_exists(title)"),
+			expectErr:       false,
+			hasPreviousItem: true,
+		},
+		{
+			name:            "conditional update fails",
 			condition:       aws.String("attribute_not_exists(title)"),
 			expectErr:       true,
-			hasPreviousItem: true, // This means we insert an item first to make the condition fail
+			hasPreviousItem: true,
 		},
 		{
-			name:            "conditional insert fails due to reserved keyword",
+			name:            "conditional update fails due to reserved keyword",
 			condition:       aws.String("attribute_not_exists(language)"),
 			expectErr:       true,
 			hasPreviousItem: false,
@@ -60,8 +65,8 @@ func TestPutItemBehavior(t *testing.T) {
 				_, _ = putItemWithCondition(baddb, nil)
 			}
 
-			ddbOut, ddbErr := putItemWithCondition(ddbLocal, tt.condition)
-			baddbOut, baddbErr := putItemWithCondition(baddb, tt.condition)
+			ddbOut, ddbErr := updateItemWithCondition(ddbLocal, tt.condition)
+			baddbOut, baddbErr := updateItemWithCondition(baddb, tt.condition)
 
 			if (ddbErr != nil) != tt.expectErr {
 				t.Errorf("ddbLocal: expected error=%v, got %v", tt.expectErr, ddbErr)
@@ -70,7 +75,6 @@ func TestPutItemBehavior(t *testing.T) {
 				t.Errorf("baddb: expected error=%v, got %v", tt.expectErr, baddbErr)
 			}
 
-			// Compare error types if both errored
 			if tt.expectErr && ddbErr != nil && baddbErr != nil {
 				if !compareWithoutRequestID(ddbErr.Error(), baddbErr.Error()) {
 					t.Errorf("expected errors to match, ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
@@ -78,35 +82,32 @@ func TestPutItemBehavior(t *testing.T) {
 			}
 
 			if !tt.expectErr {
-				comparePutItemOutput(ddbOut, baddbOut, t)
+				compareUpdateItemOutput(ddbOut, baddbOut, t)
 			}
 		})
 
-		// Clean up for next test case
 		shutdown()
 	}
 }
 
-func putItemWithCondition(client *dynamodb.Client, condition *string) (*dynamodb.PutItemOutput, error) {
-	input := &dynamodb.PutItemInput{
+func updateItemWithCondition(client *dynamodb.Client, condition *string) (*dynamodb.UpdateItemOutput, error) {
+	input := &dynamodb.UpdateItemInput{
 		TableName: aws.String("movie"),
-		Item: map[string]types.AttributeValue{
-			"year":     &types.AttributeValueMemberN{Value: "2024"},
-			"title":    &types.AttributeValueMemberS{Value: "The Shawshank Redemption"},
-			"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "9.3"}}},
-			"language": &types.AttributeValueMemberS{Value: "English"},
+		Key: map[string]types.AttributeValue{
+			"year":  &types.AttributeValueMemberN{Value: "2024"},
+			"title": &types.AttributeValueMemberS{Value: "The Shawshank Redemption"},
 		},
+		UpdateExpression:          aws.String("SET #L = :lang"),
+		ExpressionAttributeNames:  map[string]string{"#L": "language"},
+		ExpressionAttributeValues: map[string]types.AttributeValue{":lang": &types.AttributeValueMemberS{Value: "French"}},
+		ReturnValues:              types.ReturnValueAllNew,
 	}
 	if condition != nil {
 		input.ConditionExpression = condition
 	}
-	return client.PutItem(context.TODO(), input)
+	return client.UpdateItem(context.TODO(), input)
 }
 
-// comparePutItemOutput compares the Attributes maps of two PutItemOutput objects without using reflection.
-func comparePutItemOutput(ddbOutput *dynamodb.PutItemOutput, baddbOutput *dynamodb.PutItemOutput, t *testing.T) {
-	ddbAttrs := ddbOutput.Attributes
-	baddbAttrs := baddbOutput.Attributes
-
-	compareItem(ddbAttrs, baddbAttrs, t)
+func compareUpdateItemOutput(ddbOutput *dynamodb.UpdateItemOutput, baddbOutput *dynamodb.UpdateItemOutput, t *testing.T) {
+	compareItem(ddbOutput.Attributes, baddbOutput.Attributes, t)
 }

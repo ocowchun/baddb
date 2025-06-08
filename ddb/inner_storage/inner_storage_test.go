@@ -1262,7 +1262,7 @@ func TestInnerStorageScan(t *testing.T) {
 
 	{
 		// Test scan with ConsistentRead true
-		req := &scan.ScanRequest{
+		req := &scan.Request{
 			Limit:          2,
 			ConsistentRead: true,
 			TableName:      "test",
@@ -1279,7 +1279,7 @@ func TestInnerStorageScan(t *testing.T) {
 		assertEntry(entries[1], expectedEntries[1], t)
 
 		// when consistentRead is false
-		req2 := &scan.ScanRequest{
+		req2 := &scan.Request{
 			Limit:          2,
 			ConsistentRead: false,
 			TableName:      "test",
@@ -1298,7 +1298,7 @@ func TestInnerStorageScan(t *testing.T) {
 	// Test scan with ExclusiveStartKey
 	{
 		exclusiveSortKey := []byte("foo|bar1")
-		req := &scan.ScanRequest{
+		req := &scan.Request{
 			Limit:             2,
 			ConsistentRead:    true,
 			ExclusiveStartKey: &exclusiveSortKey,
@@ -1316,7 +1316,7 @@ func TestInnerStorageScan(t *testing.T) {
 		assertEntry(entries[1], expectedEntries[3], t)
 
 		// when consistentRead is false
-		req2 := &scan.ScanRequest{
+		req2 := &scan.Request{
 			Limit:             2,
 			ConsistentRead:    false,
 			ExclusiveStartKey: &exclusiveSortKey,
@@ -1342,7 +1342,7 @@ func TestInnerStorageScan(t *testing.T) {
 			return *sortKey.S == "bar2", nil
 		}
 
-		req := &scan.ScanRequest{
+		req := &scan.Request{
 			Limit:          2,
 			ConsistentRead: true,
 			TableName:      "test",
@@ -1389,7 +1389,7 @@ func TestInnerStorageScanWithSegments(t *testing.T) {
 	totalSegments := int32(3)
 	found := make(map[string]*core.Entry)
 	for segment := int32(0); segment < totalSegments; segment++ {
-		req := &scan.ScanRequest{
+		req := &scan.Request{
 			TotalSegments: &totalSegments,
 			Segment:       &segment,
 			TableName:     "test",
@@ -1464,7 +1464,7 @@ func TestInnerStorageScanGsi(t *testing.T) {
 	{
 		// set gsiDelay to 100 to get 0 entries in the scan
 		updateTestTableMetadata(storage, "test", 5, 100, 0)
-		req := &scan.ScanRequest{
+		req := &scan.Request{
 			Limit:     2,
 			TableName: "test",
 			IndexName: &gsiName,
@@ -1482,7 +1482,7 @@ func TestInnerStorageScanGsi(t *testing.T) {
 	{
 		// set gsiDelay to 0 to get the entries
 		updateTestTableMetadata(storage, "test", 5, 0, 0)
-		req := &scan.ScanRequest{
+		req := &scan.Request{
 			Limit:     2,
 			TableName: "test",
 			IndexName: &gsiName,
@@ -1499,70 +1499,4 @@ func TestInnerStorageScanGsi(t *testing.T) {
 		assertEntry(entries[1], expectedEntries[1], t)
 
 	}
-
-	//// Test scan with ExclusiveStartKey
-	//{
-	//	exclusiveSortKey := []byte("foo|bar1")
-	//	req := &scan.ScanRequest{
-	//		Limit:             2,
-	//		ConsistentRead:    true,
-	//		ExclusiveStartKey: &exclusiveSortKey,
-	//		TableName:         "test",
-	//	}
-	//	res, err := storage.Scan(req)
-	//	if err != nil {
-	//		t.Fatalf("Scan failed: %v", err)
-	//	}
-	//	entries := res.Entries
-	//	if len(entries) != 2 {
-	//		t.Fatalf("Scan failed: expected 2 Entries but got %d", len(entries))
-	//	}
-	//	assertEntry(entries[0], expectedEntries[2], t)
-	//	assertEntry(entries[1], expectedEntries[3], t)
-	//
-	//	// when consistentRead is false
-	//	req2 := &scan.ScanRequest{
-	//		Limit:             2,
-	//		ConsistentRead:    false,
-	//		ExclusiveStartKey: &exclusiveSortKey,
-	//		TableName:         "test",
-	//	}
-	//	res2, err := storage.Scan(req2)
-	//	if err != nil {
-	//		t.Fatalf("Query failed: %v", err)
-	//	}
-	//	entries2 := res2.Entries
-	//	if len(entries2) != 0 {
-	//		t.Fatalf("Query failed: expected 0 Entries but got %d", len(entries2))
-	//	}
-	//}
-	//
-	//// Test scan with Filter
-	//{
-	//	filter := func(entry *core.Entry) (bool, error) {
-	//		sortKey, ok := entry.Body["sortKey"]
-	//		if !ok {
-	//			return false, nil
-	//		}
-	//		return *sortKey.S == "bar2", nil
-	//	}
-	//
-	//	req := &scan.ScanRequest{
-	//		Limit:          2,
-	//		ConsistentRead: true,
-	//		TableName:      "test",
-	//		Filter:         condition.NewCondition(filter),
-	//	}
-	//
-	//	res, err := storage.Scan(req)
-	//
-	//	if err != nil {
-	//		t.Fatalf("Scan failed: %v", err)
-	//	}
-	//	entries := res.Entries
-	//	if len(entries) != 1 {
-	//		t.Fatalf("Scan failed: expected 0 entry but got %d", len(entries))
-	//	}
-	//	assertEntry(entries[0], expectedEntries[2], t)
-	//}
 }

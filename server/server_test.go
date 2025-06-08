@@ -635,7 +635,7 @@ func TestTransactWriteItems(t *testing.T) {
 		TransactItems: []types.TransactWriteItem{
 			{
 				ConditionCheck: &types.ConditionCheck{
-					ConditionExpression: aws.String("attribute_not_exists(year)"),
+					ConditionExpression: aws.String("attribute_not_exists(title)"),
 					Key: map[string]types.AttributeValue{
 						"year":  &types.AttributeValueMemberN{Value: "2025"},
 						"title": &types.AttributeValueMemberS{Value: "Hello World 2"},
@@ -726,7 +726,6 @@ func TestTransactWriteItems(t *testing.T) {
 			}
 
 		}
-
 	}
 }
 
@@ -815,7 +814,7 @@ func TestPutWithCondition(t *testing.T) {
 		t.Fatalf("Expected no error, got %v", err)
 	}
 
-	// Try to update item with a invalid condition
+	// Try to update item with an invalid condition
 	putItemInput := &dynamodb.PutItemInput{
 		Item: map[string]types.AttributeValue{
 			"year":       &types.AttributeValueMemberN{Value: "2025"},
@@ -823,14 +822,14 @@ func TestPutWithCondition(t *testing.T) {
 			"regionCode": &types.AttributeValueMemberS{Value: "1"},
 		},
 		TableName:           aws.String("movie"),
-		ConditionExpression: aws.String("attribute_not_exists(#year)"),
+		ConditionExpression: aws.String("attribute_not_exists(#title)"),
 	}
 
 	_, err = ddb.PutItem(context.Background(), putItemInput)
 	if err == nil {
 		t.Fatalf("Expected Validation error, got nil")
 	} else {
-		if !strings.Contains(err.Error(), "An expression attribute name used in the document path is not defined; attribute name: #year") {
+		if !strings.Contains(err.Error(), "An expression attribute name used in the document path is not defined; attribute name: #title") {
 			t.Fatalf("error message is unexpected, got %v", err)
 		}
 	}
@@ -843,7 +842,7 @@ func TestPutWithCondition(t *testing.T) {
 			"regionCode": &types.AttributeValueMemberS{Value: "1"},
 		},
 		TableName:           aws.String("movie"),
-		ConditionExpression: aws.String("attribute_not_exists(year)"),
+		ConditionExpression: aws.String("attribute_not_exists(title)"),
 	}
 
 	_, err = ddb.PutItem(context.Background(), putItemInput)
@@ -924,7 +923,7 @@ func TestDeleteWithCondition(t *testing.T) {
 			"title": &types.AttributeValueMemberS{Value: "Hello World"},
 		},
 		TableName:           aws.String("movie"),
-		ConditionExpression: aws.String("attribute_not_exists(year)"),
+		ConditionExpression: aws.String("attribute_not_exists(title)"),
 	}
 
 	_, err = ddb.DeleteItem(context.Background(), deleteItemInput)
@@ -944,7 +943,7 @@ func TestDeleteWithCondition(t *testing.T) {
 			"title": &types.AttributeValueMemberS{Value: "Hello World"},
 		},
 		TableName:           aws.String("movie"),
-		ConditionExpression: aws.String("attribute_exists(year)"),
+		ConditionExpression: aws.String("attribute_exists(title)"),
 	}
 
 	_, err = ddb.DeleteItem(context.Background(), deleteItemInput)

@@ -53,7 +53,7 @@ func TestBuildComparatorCondition(t *testing.T) {
 
 	for _, tt := range tests {
 
-		builder := &ScanRequestBuilder{
+		builder := &RequestBuilder{
 			FilterExpressionStr:      aws.String(tt.filter),
 			ExpressionAttributeNames: make(map[string]string),
 			ExpressionAttributeValues: map[string]core.AttributeValue{

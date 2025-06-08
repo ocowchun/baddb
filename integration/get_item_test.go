@@ -50,11 +50,11 @@ func TestGetItemBehavior(t *testing.T) {
 		if tt.insertItem {
 			_, err := putItemWithCondition(ddbLocal, nil)
 			if err != nil {
-				t.Fatalf("failed to put item in ddbLocal: %v", err)
+				t.Fatalf("failed to request item in ddbLocal: %v", err)
 			}
 			_, err = putItemWithCondition(baddb, nil)
 			if err != nil {
-				t.Fatalf("failed to put item in baddb: %v", err)
+				t.Fatalf("failed to request item in baddb: %v", err)
 			}
 		}
 

@@ -20,7 +20,6 @@ func BuildCondition(
 	expressionAttributeNames map[string]string,
 	expressionAttributeValues map[string]core.AttributeValue,
 ) (*Condition, error) {
-	// TODO: handle reserved words in attribute names
 	conditionExpression, err := expression.ParseConditionExpression(conditionExpressionContent)
 	if err != nil {
 		return nil, err
