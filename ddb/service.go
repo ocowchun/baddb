@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	condition2 "github.com/ocowchun/baddb/ddb/condition"
+	"github.com/ocowchun/baddb/ddb/condition"
 	"github.com/ocowchun/baddb/ddb/core"
 	"github.com/ocowchun/baddb/ddb/inner_storage"
-	query2 "github.com/ocowchun/baddb/ddb/query"
+	"github.com/ocowchun/baddb/ddb/query"
 	"github.com/ocowchun/baddb/ddb/request"
 	"github.com/ocowchun/baddb/ddb/scan"
 	"github.com/ocowchun/baddb/expression"
@@ -524,7 +524,7 @@ func (svc *Service) Query(ctx context.Context, input *dynamodb.QueryInput) (*dyn
 		expressionAttributeValues[k] = core.TransformDdbAttributeValue(v)
 	}
 
-	builder := query2.QueryBuilder{
+	builder := query.QueryBuilder{
 		KeyConditionExpression:    keyConditionExpression,
 		ExpressionAttributeValues: expressionAttributeValues,
 		ExpressionAttributeNames:  input.ExpressionAttributeNames,
@@ -536,13 +536,13 @@ func (svc *Service) Query(ctx context.Context, input *dynamodb.QueryInput) (*dyn
 		ScanIndexForward:          input.ScanIndexForward,
 	}
 
-	query, err := builder.BuildQuery()
+	queryReq, err := builder.BuildQuery()
 	if err != nil {
 		return nil, err
 	}
-	query.TableName = tableName
+	queryReq.TableName = tableName
 
-	res, err := svc.storage.Query(query)
+	res, err := svc.storage.Query(queryReq)
 	if err != nil {
 		return nil, err
 	}
@@ -786,14 +786,14 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				return nil, err
 			}
 
-			var cond *condition2.Condition
+			var cond *condition.Condition
 			if conditionCheck.ConditionExpression == nil || *conditionCheck.ConditionExpression == "" {
 				return nil, &ValidationException{
 					Message: "The expression can not be empty;",
 				}
 			}
 
-			cond, err = condition2.BuildCondition(
+			cond, err = condition.BuildCondition(
 				*conditionCheck.ConditionExpression,
 				conditionCheck.ExpressionAttributeNames,
 				core.NewEntryFromItem(conditionCheck.ExpressionAttributeValues).Body,
