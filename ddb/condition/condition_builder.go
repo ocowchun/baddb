@@ -109,14 +109,6 @@ func (b *ConditionBuilder) buildOperand(operand ast.Operand) (Operand, error) {
 
 }
 
-type ReservedKeywordException struct {
-	ReservedKeyword string
-}
-
-func (e *ReservedKeywordException) Error() string {
-	return fmt.Sprintf("Attribute name is a reserved keyword; reserved keyword: %s", e.ReservedKeyword)
-}
-
 func (b *ConditionBuilder) buildPath(operand ast.Operand) (*PathOperand, error) {
 	// it's ok to have condition like name = "ben", but is it also ok to have name = lastName?
 	switch operand := operand.(type) {
@@ -137,9 +129,6 @@ func (b *ConditionBuilder) buildPath(operand ast.Operand) (*PathOperand, error) 
 			return nil, fmt.Errorf("path contains attribute value: %s", operand.Identifier.TokenLiteral())
 		} else {
 			name := operand.Identifier.TokenLiteral()
-			if _, ok := core.ReservedWords[strings.ToUpper(name)]; ok {
-				return nil, &ReservedKeywordException{ReservedKeyword: name}
-			}
 
 			return &PathOperand{
 				inner: &core.AttributeNameOperand{

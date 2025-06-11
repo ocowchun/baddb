@@ -443,7 +443,10 @@ func TestPerformAddClause(t *testing.T) {
 					"views": {N: aws.String("100")},
 				},
 			},
-			updateExpressionContent: "ADD views :increment",
+			updateExpressionContent: "ADD #views :increment",
+			expressionAttributeNames: map[string]string{
+				"#views": "views",
+			},
 			expressionAttributeValues: map[string]core.AttributeValue{
 				":increment": {N: aws.String("10")},
 			},
@@ -473,7 +476,10 @@ func TestPerformAddClause(t *testing.T) {
 			entry: &core.Entry{
 				Body: map[string]core.AttributeValue{},
 			},
-			updateExpressionContent: "ADD views :increment",
+			updateExpressionContent: "ADD #views :increment",
+			expressionAttributeNames: map[string]string{
+				"#views": "views",
+			},
 			expressionAttributeValues: map[string]core.AttributeValue{
 				":increment": {N: aws.String("10")},
 			},
@@ -489,7 +495,10 @@ func TestPerformAddClause(t *testing.T) {
 					"views": {S: aws.String("one hundred")},
 				},
 			},
-			updateExpressionContent: "ADD views :increment",
+			updateExpressionContent: "ADD #views :increment",
+			expressionAttributeNames: map[string]string{
+				"#views": "views",
+			},
 			expressionAttributeValues: map[string]core.AttributeValue{
 				":increment": {N: aws.String("10")},
 			},
@@ -592,7 +601,10 @@ func TestPerformDeleteClause(t *testing.T) {
 					"views": {N: aws.String("100")},
 				},
 			},
-			updateExpressionContent: "DELETE views :removeViews",
+			updateExpressionContent: "DELETE #views :removeViews",
+			expressionAttributeNames: map[string]string{
+				"#views": "views",
+			},
 			expressionAttributeValues: map[string]core.AttributeValue{
 				":removeViews": {N: aws.String("10")},
 			},

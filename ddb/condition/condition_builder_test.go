@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/ocowchun/baddb/ddb/core"
+	"github.com/ocowchun/baddb/expression/parser"
 	"testing"
 )
 
@@ -452,7 +453,7 @@ func TestBuildConditionReservedWord(t *testing.T) {
 		},
 	)
 
-	var actualErr *ReservedKeywordException
+	var actualErr *parser.ReservedKeywordException
 	if errors.As(err, &actualErr) {
 		if actualErr.ReservedKeyword != "language" {
 			t.Fatalf("expected reserved keyword 'language', got: %s", actualErr.ReservedKeyword)

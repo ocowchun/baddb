@@ -9,7 +9,7 @@ import (
 )
 
 func TestSimplePredicateExpression(t *testing.T) {
-	exp := "year = :year"
+	exp := "createdYear = :year"
 	keyConditionExpression, err := expression.ParseKeyConditionExpression(exp)
 	if err != nil {
 		t.Fatalf("expect no error, got %v", err)
@@ -24,7 +24,7 @@ func TestSimplePredicateExpression(t *testing.T) {
 		},
 		TableMetadata: &core.TableMetaData{
 			PartitionKeySchema: &core.KeySchema{
-				AttributeName: "year",
+				AttributeName: "createdYear",
 			},
 		},
 	}
@@ -52,32 +52,32 @@ func TestSimplePredicateExpression_With_SortKey(t *testing.T) {
 
 	testCases := []TestCase{
 		{
-			exp:       "year = :year AND title = :leftTitle",
+			exp:       "createdYear = :year AND title = :leftTitle",
 			leftTitle: "Star Wars 4",
 			matches:   []bool{true, false, false},
 		},
 		{
-			exp:       "year = :year AND title > :leftTitle",
+			exp:       "createdYear = :year AND title > :leftTitle",
 			leftTitle: "Star Wars 4",
 			matches:   []bool{false, true, true},
 		},
 		{
-			exp:       "year = :year AND title >= :leftTitle",
+			exp:       "createdYear = :year AND title >= :leftTitle",
 			leftTitle: "Star Wars 4",
 			matches:   []bool{true, true, true},
 		},
 		{
-			exp:       "year = :year AND title < :leftTitle",
+			exp:       "createdYear = :year AND title < :leftTitle",
 			leftTitle: "Star Wars 5",
 			matches:   []bool{true, false, false},
 		},
 		{
-			exp:       "year = :year AND title <= :leftTitle",
+			exp:       "createdYear = :year AND title <= :leftTitle",
 			leftTitle: "Star Wars 5",
 			matches:   []bool{true, true, false},
 		},
 		{
-			exp:        "year = :year AND title BETWEEN :leftTitle AND :rightTitle",
+			exp:        "createdYear = :year AND title BETWEEN :leftTitle AND :rightTitle",
 			leftTitle:  "Star Wars 5",
 			rightTitle: "Star Wars 6",
 			matches:    []bool{false, true, true},
@@ -132,7 +132,7 @@ func TestSimplePredicateExpression_With_SortKey(t *testing.T) {
 			ExpressionAttributeValues: expressionAttributeValues,
 			TableMetadata: &core.TableMetaData{
 				PartitionKeySchema: &core.KeySchema{
-					AttributeName: "year",
+					AttributeName: "createdYear",
 				},
 				SortKeySchema: &core.KeySchema{
 					AttributeName: "title",

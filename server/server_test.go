@@ -541,7 +541,10 @@ func TestQuery(t *testing.T) {
 	{
 		queryInput := &dynamodb.QueryInput{
 			TableName:              aws.String("movie"),
-			KeyConditionExpression: aws.String("year = :year"),
+			KeyConditionExpression: aws.String("#year = :year"),
+			ExpressionAttributeNames: map[string]string{
+				"#year": "year",
+			},
 			ExpressionAttributeValues: map[string]types.AttributeValue{
 				":year": &types.AttributeValueMemberN{Value: "2025"},
 			},
@@ -566,7 +569,10 @@ func TestQuery(t *testing.T) {
 	{
 		queryInput := &dynamodb.QueryInput{
 			TableName:              aws.String("movie"),
-			KeyConditionExpression: aws.String("year = :year"),
+			KeyConditionExpression: aws.String("#year = :year"),
+			ExpressionAttributeNames: map[string]string{
+				"#year": "year",
+			},
 			ExpressionAttributeValues: map[string]types.AttributeValue{
 				":year": &types.AttributeValueMemberN{Value: "2025"},
 			},
@@ -591,7 +597,10 @@ func TestQuery(t *testing.T) {
 	{
 		queryInput := &dynamodb.QueryInput{
 			TableName:              aws.String("movie"),
-			KeyConditionExpression: aws.String("year = :year"),
+			KeyConditionExpression: aws.String("#year = :year"),
+			ExpressionAttributeNames: map[string]string{
+				"#year": "year",
+			},
 			ExpressionAttributeValues: map[string]types.AttributeValue{
 				":year": &types.AttributeValueMemberN{Value: "2025"},
 			},

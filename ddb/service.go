@@ -515,7 +515,7 @@ func (svc *Service) Query(ctx context.Context, input *dynamodb.QueryInput) (*dyn
 	keyConditionExpression, err := expression.ParseKeyConditionExpression(*input.KeyConditionExpression)
 	if err != nil {
 		err = &ValidationException{
-			Message: "Invalid KeyConditionExpression: Syntax error;",
+			Message: err.Error(),
 		}
 		return nil, err
 	}

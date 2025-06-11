@@ -3,10 +3,12 @@ package parser
 import (
 	"errors"
 	"fmt"
+	"github.com/ocowchun/baddb/ddb/core"
 	"github.com/ocowchun/baddb/expression/ast"
 	"github.com/ocowchun/baddb/expression/lexer"
 	"github.com/ocowchun/baddb/expression/token"
 	"strconv"
+	"strings"
 )
 
 type Parser struct {
@@ -26,10 +28,18 @@ func New(l *lexer.Lexer) *Parser {
 	return p
 }
 
+type InvalidKeyConditionExpressionError struct {
+	rawErr error
+}
+
+func (e *InvalidKeyConditionExpressionError) Error() string {
+	return fmt.Sprintf("Invalid KeyConditionExpression: %v", e.rawErr)
+}
+
 func (p *Parser) ParseKeyConditionExpression() (*ast.KeyConditionExpression, error) {
 	predicate1, err := p.parsePredicateExpression()
 	if err != nil {
-		return nil, err
+		return nil, &InvalidKeyConditionExpressionError{rawErr: err}
 	}
 	keyCondExpression := &ast.KeyConditionExpression{
 		Predicate1: predicate1,
@@ -39,7 +49,7 @@ func (p *Parser) ParseKeyConditionExpression() (*ast.KeyConditionExpression, err
 		p.nextToken()
 		predicate2, err := p.parsePredicateExpression()
 		if err != nil {
-			return nil, err
+			return nil, &InvalidKeyConditionExpressionError{rawErr: err}
 		}
 		keyCondExpression.Predicate2 = predicate2
 	}
@@ -147,36 +157,21 @@ func (p *Parser) parsePredicateExpression() (ast.PredicateExpression, error) {
 }
 
 func (p *Parser) parseAttributeName() (ast.AttributeName, error) {
-	if p.curTokenIs(token.IDENT) {
-		i, err := p.parseIdentifier()
-		if err != nil {
-			return nil, err
-		}
-		identifier, ok := i.(*ast.Identifier)
-		if !ok {
-			return nil, fmt.Errorf("failed to parse identifier")
-		}
-		return identifier, nil
-	} else if p.curTokenIs(token.SHARP) {
-		attributeNameIdentifier := &ast.AttributeNameIdentifier{
-			Token: p.curToken,
-		}
-
-		p.nextToken()
-		i, err := p.parseIdentifier()
-		if err != nil {
-			return nil, err
-		}
-		identifier, ok := i.(*ast.Identifier)
-		if !ok {
-			return nil, fmt.Errorf("failed to parse identifier")
-		}
-		attributeNameIdentifier.Name = identifier
-
-		return attributeNameIdentifier, nil
+	operand, err := p.parseAttributeNameOperand()
+	if err != nil {
+		return nil, err
 	}
+	if operand.HasColon {
+		return nil, fmt.Errorf("failed to parse identifier")
+	} else if operand.HasSharp {
+		attributeNameIdentifier := &ast.AttributeNameIdentifier{
+			Name: operand.Identifier,
+		}
+		return attributeNameIdentifier, nil
+	} else {
 
-	return nil, fmt.Errorf("unexpected token %v", p.curToken)
+		return operand.Identifier, nil
+	}
 }
 
 func (p *Parser) parseOperator() (string, error) {
@@ -647,6 +642,14 @@ func (p *Parser) parseFunctionConditionExpression() (ast.FunctionExpression, err
 	}
 }
 
+type ReservedKeywordException struct {
+	ReservedKeyword string
+}
+
+func (e *ReservedKeywordException) Error() string {
+	return fmt.Sprintf("Attribute name is a reserved keyword; reserved keyword: %s", e.ReservedKeyword)
+}
+
 func (p *Parser) parseAttributeNameOperand() (*ast.AttributeNameOperand, error) {
 	if p.curTokenIs(token.IDENT) {
 		i, err := p.parseIdentifier()
@@ -657,6 +660,11 @@ func (p *Parser) parseAttributeNameOperand() (*ast.AttributeNameOperand, error) 
 		identifier, ok := i.(*ast.Identifier)
 		if !ok {
 			return nil, fmt.Errorf("failed to parse identifier")
+		}
+
+		// check if the identifier is a reserved keyword
+		if _, ok := core.ReservedWords[strings.ToUpper(identifier.Value)]; ok {
+			return nil, &ReservedKeywordException{ReservedKeyword: identifier.Value}
 		}
 
 		return &ast.AttributeNameOperand{
