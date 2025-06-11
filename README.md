@@ -77,3 +77,133 @@ aws dynamodb batch-write-item \
     --endpoint-url http://localhost:9527
     
 ```
+
+
+## Support
+### BatchGetItem
+- [ ] AttributesToGet
+- [x] ConsistentRead
+- [ ] ProjectionExpression
+- [ ] ReturnConsumedCapacity
+
+
+### BatchWriteItem
+- [x] DeleteRequest
+- [x] PutRequest
+- [ ] ReturnConsumedCapacity
+- [ ] ReturnItemCollectionMetrics
+
+### Create Table
+- [x] AttributeDefinitions
+- [x] BillingMode
+- [ ] DeletionProtectionEnabled
+- [x] GlobalSecondaryIndexes
+- [x] KeySchema
+- [ ] LocalSecondaryIndexes
+- [ ] OnDemandThroughput
+- [x] ProvisionedThroughput
+- [ ] ResourcePolicy
+- [ ] SSESpecification
+- [ ] StreamSpecification
+- [ ] TableClass
+- [x] TableName
+- [ ] Tags
+- [ ] WarmThroughput
+
+### DeleteItem
+- [ ] ConditionalOperator
+- [x] ConditionExpression
+- [ ] Expected
+- [x] ExpressionAttributeNames
+- [x] ExpressionAttributeValues
+- [x] Key
+- [ ] ReturnConsumedCapacity
+- [ ] ReturnItemCollectionMetrics
+- [ ] ReturnValues
+- [ ] ReturnValuesOnConditionCheckFailure
+- [x] TableName
+
+### DeleteTable
+- [x] TableName
+
+### DescribeTable
+- [x] TableName
+
+### GetItem
+- [ ] AttributesToGet
+- [x] ConsistentRead
+- [ ] ExpressionAttributeNames
+- [x] Keys
+- [ ] ProjectionExpression 
+- [ ] ReturnConsumedCapacity
+- [x] TableName
+
+### ListTables
+TBD
+
+### PutItem
+- [ ] ConditionalOperator
+- [x] ConditionExpression
+- [ ] Expected 
+- [x] ExpressionAttributeNames
+- [x] ExpressionAttributeValues
+- [x] Item
+- [ ] ReturnConsumedCapacity
+- [ ] ReturnItemCollectionMetrics
+- [ ] ReturnValues
+- [ ] ReturnValuesOnConditionCheckFailure
+- [x] TableName
+
+### Query
+- [ ] AttributesToGet
+- [ ] ConditionalOperator
+- [x] ConsistentRead
+- [x] ExclusiveStartKey
+- [x] ExpressionAttributeNames
+- [x] ExpressionAttributeValues
+- [x] FilterExpression
+- [x] IndexName
+- [x] KeyConditionExpression
+- [ ] KeyConditions
+- [x] Limit
+- [ ] ProjectionExpression
+- [ ] QueryFilter
+- [ ] ReturnConsumedCapacity
+- [x] ScanIndexForward
+- [ ] Select
+- [x] TableName
+
+### Scan
+- [ ] AttributesToGet
+- [ ] ConditionalOperator
+- [x] ConsistentRead
+- [x] ExclusiveStartKey
+- [x] ExpressionAttributeNames
+- [x] ExpressionAttributeValues
+- [x] FilterExpression
+- [x] IndexName
+- [x] Limit
+- [ ] ProjectionExpression
+- [ ] ReturnConsumedCapacity
+- [ ] ReturnConsumedCapacity
+- [ ] ScanFilter
+- [x] Segment
+- [ ] Select
+- [x] TableName
+- [x] TotalSegments
+
+### TransactGetItems
+TBD
+
+
+### TransactWriteItems
+- [ ] ClientRequestToken
+- [ ] ReturnConsumedCapacity
+- [ ] ReturnItemCollectionMetrics
+- [x] TransactItems
+
+### UpdateTable
+TBD
+
+### UpdateTimeToLive
+TBD
