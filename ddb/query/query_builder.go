@@ -3,6 +3,7 @@ package query
 import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/ocowchun/baddb/ddb/condition"
 	"github.com/ocowchun/baddb/ddb/core"
 	"github.com/ocowchun/baddb/expression/ast"
 	"log"
@@ -12,6 +13,7 @@ type QueryBuilder struct {
 	KeyConditionExpression    *ast.KeyConditionExpression
 	ExpressionAttributeValues map[string]core.AttributeValue
 	ExpressionAttributeNames  map[string]string
+	FilterExpressionStr       *string
 	TableMetadata             *core.TableMetaData
 	ExclusiveStartKey         map[string]types.AttributeValue
 	ConsistentRead            *bool
@@ -60,6 +62,7 @@ type Query struct {
 	ScanIndexForward  bool
 	TableName         string
 	IndexName         *string
+	Filter            *condition.Condition
 }
 
 func (b *QueryBuilder) BuildQuery() (*Query, error) {
@@ -111,6 +114,18 @@ func (b *QueryBuilder) BuildQuery() (*Query, error) {
 
 	if query.PartitionKey == nil {
 		return nil, fmt.Errorf("partitionKey %s must be specified", *b.expectedPartitionKey())
+	}
+
+	if b.FilterExpressionStr != nil {
+		filter, err := condition.BuildCondition(
+			*b.FilterExpressionStr,
+			b.ExpressionAttributeNames,
+			b.ExpressionAttributeValues,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build filter expression: %v", err)
+		}
+		query.Filter = filter
 	}
 
 	if len(b.ExclusiveStartKey) > 0 {

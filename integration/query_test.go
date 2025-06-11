@@ -20,7 +20,7 @@ func TestQueryByPartitionKey(t *testing.T) {
 		t.Fatalf("failed to create table: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
 	}
 
-	for _, item := range scanTestItems() {
+	for _, item := range queryTestItems() {
 		_, _ = putItemRaw(ddbLocal, item)
 		_, _ = putItemRaw(baddb, item)
 	}
@@ -59,7 +59,7 @@ func TestQueryWithFilter(t *testing.T) {
 		t.Fatalf("failed to create table: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
 	}
 
-	for _, item := range scanTestItems() {
+	for _, item := range queryTestItems() {
 		_, _ = putItemRaw(ddbLocal, item)
 		_, _ = putItemRaw(baddb, item)
 	}
@@ -68,8 +68,8 @@ func TestQueryWithFilter(t *testing.T) {
 		TableName:              aws.String("movie"),
 		KeyConditionExpression: aws.String("#year = :year"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":year": &types.AttributeValueMemberN{Value: "1994"},
-			":lang": &types.AttributeValueMemberS{Value: "English"},
+			":year": &types.AttributeValueMemberN{Value: "2001"},
+			":lang": &types.AttributeValueMemberS{Value: "Japanese"},
 		},
 		FilterExpression: aws.String("#lang = :lang"),
 		ExpressionAttributeNames: map[string]string{
@@ -99,7 +99,7 @@ func TestQueryWithReservedWord(t *testing.T) {
 		t.Fatalf("failed to create table: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
 	}
 
-	for _, item := range scanTestItems() {
+	for _, item := range queryTestItems() {
 		_, _ = putItemRaw(ddbLocal, item)
 		_, _ = putItemRaw(baddb, item)
 	}
@@ -136,7 +136,7 @@ func TestQueryGSI(t *testing.T) {
 		t.Fatalf("failed to create table: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
 	}
 
-	for _, item := range scanTestItems() {
+	for _, item := range queryTestItems() {
 		_, _ = putItemRaw(ddbLocal, item)
 		_, _ = putItemRaw(baddb, item)
 	}
@@ -174,7 +174,7 @@ func TestQueryPartitionKeyAndSortKey(t *testing.T) {
 		t.Fatalf("failed to create table: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
 	}
 
-	for _, item := range scanTestItems() {
+	for _, item := range queryTestItems() {
 		_, _ = putItemRaw(ddbLocal, item)
 		_, _ = putItemRaw(baddb, item)
 	}
@@ -227,5 +227,59 @@ func queryAllPages(client *dynamodb.Client, baseInput *dynamodb.QueryInput) ([]m
 		}
 		lastKey = out.LastEvaluatedKey
 	}
+
 	return allItems, nil
+}
+
+func queryTestItems() []map[string]types.AttributeValue {
+	return []map[string]types.AttributeValue{
+		{
+			"year":     &types.AttributeValueMemberN{Value: "2024"},
+			"title":    &types.AttributeValueMemberS{Value: "The Shawshank Redemption"},
+			"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "9.3"}}},
+			"language": &types.AttributeValueMemberS{Value: "English"},
+		},
+		{
+			"year":     &types.AttributeValueMemberN{Value: "1994"},
+			"title":    &types.AttributeValueMemberS{Value: "Pulp Fiction"},
+			"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "8.9"}}},
+			"language": &types.AttributeValueMemberS{Value: "English"},
+		},
+		{
+			"year":     &types.AttributeValueMemberN{Value: "2001"},
+			"title":    &types.AttributeValueMemberS{Value: "Spirited Away"},
+			"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "8.6"}}},
+			"language": &types.AttributeValueMemberS{Value: "Japanese"},
+		},
+		{
+			"year":     &types.AttributeValueMemberN{Value: "2001"},
+			"title":    &types.AttributeValueMemberS{Value: "The Lord of the Rings: The Fellowship of the Ring"},
+			"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "8.8"}}},
+			"language": &types.AttributeValueMemberS{Value: "English"},
+		},
+		{
+			"year":     &types.AttributeValueMemberN{Value: "2010"},
+			"title":    &types.AttributeValueMemberS{Value: "Inception"},
+			"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "8.8"}}},
+			"language": &types.AttributeValueMemberS{Value: "English"},
+		},
+		{
+			"year":     &types.AttributeValueMemberN{Value: "1999"},
+			"title":    &types.AttributeValueMemberS{Value: "The Matrix"},
+			"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "8.7"}}},
+			"language": &types.AttributeValueMemberS{Value: "English"},
+		},
+		{
+			"year":     &types.AttributeValueMemberN{Value: "2014"},
+			"title":    &types.AttributeValueMemberS{Value: "Interstellar"},
+			"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "8.6"}}},
+			"language": &types.AttributeValueMemberS{Value: "English"},
+		},
+		{
+			"year":     &types.AttributeValueMemberN{Value: "1994"},
+			"title":    &types.AttributeValueMemberS{Value: "Forrest Gump"},
+			"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "8.8"}}},
+			"language": &types.AttributeValueMemberS{Value: "English"},
+		},
+	}
 }

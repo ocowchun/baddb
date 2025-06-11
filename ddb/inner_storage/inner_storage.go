@@ -976,6 +976,15 @@ func (s *InnerStorage) Query(req *query.Query) (*QueryResponse, error) {
 					continue
 				}
 			}
+			if req.Filter != nil {
+				matched, err := req.Filter.Check(entry)
+				if err != nil {
+					return nil, err
+				}
+				if !matched {
+					continue
+				}
+			}
 			results = append(results, entry)
 		}
 

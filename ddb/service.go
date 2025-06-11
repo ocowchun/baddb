@@ -528,6 +528,7 @@ func (svc *Service) Query(ctx context.Context, input *dynamodb.QueryInput) (*dyn
 		KeyConditionExpression:    keyConditionExpression,
 		ExpressionAttributeValues: expressionAttributeValues,
 		ExpressionAttributeNames:  input.ExpressionAttributeNames,
+		FilterExpressionStr:       input.FilterExpression,
 		TableMetadata:             tableMetadata,
 		ExclusiveStartKey:         input.ExclusiveStartKey,
 		ConsistentRead:            input.ConsistentRead,
