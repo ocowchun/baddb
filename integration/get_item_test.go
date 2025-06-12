@@ -79,6 +79,36 @@ func TestGetItemBehavior(t *testing.T) {
 	}
 }
 
+func TestGetItemTableNotExists(t *testing.T) {
+	ddbLocal := newDdbLocalClient()
+	baddb := newBaddbClient()
+	cleanDdbLocal(ddbLocal)
+	shutdown := startServer()
+
+	key := map[string]types.AttributeValue{
+		"year":  &types.AttributeValueMemberN{Value: "2000"},
+		"title": &types.AttributeValueMemberS{Value: "Gladiator"},
+	}
+
+	ddbOut, ddbErr := getItem(ddbLocal, key)
+	baddbOut, baddbErr := getItem(baddb, key)
+
+	if ddbErr == nil || baddbErr == nil {
+		t.Errorf("expected error for missing table, got ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
+	}
+	if ddbErr != nil && baddbErr != nil && !compareWithoutRequestID(ddbErr.Error(), baddbErr.Error()) {
+		t.Errorf("expected errors to match, ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
+	}
+	if ddbOut != nil && len(ddbOut.Item) != 0 {
+		t.Errorf("expected no item from ddbLocal, got %v", ddbOut.Item)
+	}
+	if baddbOut != nil && len(baddbOut.Item) != 0 {
+		t.Errorf("expected no item from baddb, got %v", baddbOut.Item)
+	}
+
+	shutdown()
+}
+
 func getItem(client *dynamodb.Client, key map[string]types.AttributeValue) (*dynamodb.GetItemOutput, error) {
 	input := &dynamodb.GetItemInput{
 		TableName: aws.String("movie"),

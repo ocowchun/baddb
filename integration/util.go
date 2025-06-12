@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -214,4 +215,30 @@ func compareWithoutRequestID(s1, s2 string) bool {
 	clean1 := re.ReplaceAllString(s1, "")
 	clean2 := re.ReplaceAllString(s2, "")
 	return strings.TrimSpace(clean1) == strings.TrimSpace(clean2)
+}
+
+func compareItems(ddbItems, baddbItems []map[string]types.AttributeValue, t *testing.T) {
+	if len(ddbItems) != len(baddbItems) {
+		t.Errorf("Scan item count differ: ddbLocal=%d, baddb=%d", len(ddbItems), len(baddbItems))
+		return
+	}
+
+	sortItems(ddbItems)
+	sortItems(baddbItems)
+	for i := range ddbItems {
+		compareItem(ddbItems[i], baddbItems[i], t)
+	}
+}
+
+func sortItems(items []map[string]types.AttributeValue) {
+	sort.Slice(items, func(i, j int) bool {
+		yearI := items[i]["year"].(*types.AttributeValueMemberN).Value
+		yearJ := items[j]["year"].(*types.AttributeValueMemberN).Value
+		if yearI != yearJ {
+			return yearI < yearJ
+		}
+		titleI := items[i]["title"].(*types.AttributeValueMemberS).Value
+		titleJ := items[j]["title"].(*types.AttributeValueMemberS).Value
+		return titleI < titleJ
+	})
 }

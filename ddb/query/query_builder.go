@@ -370,8 +370,40 @@ func (b *QueryBuilder) EvaluatePredicateExpression(expression ast.PredicateExpre
 		}, nil
 
 	case ast.BEGINS_WITH:
-		// TODO: implement it later
+		pred, ok := expression.(*ast.BeginsWithPredicateExpression)
 
+		if !ok {
+			panic("failed to cast as BeginsWithPredicateExpression")
+		}
+
+		key, err := b.extractAttributeName(pred.AttributeName)
+		if err != nil {
+			return nil, err
+		}
+
+		isSortKey := b.expectedSortKey() != nil && key == *b.expectedSortKey()
+		if !isSortKey {
+			return nil, fmt.Errorf("only sort key support begins_with predicate expression")
+		}
+
+		prefixVal, err := b.extractAttributeValue(pred.Value)
+		if err != nil {
+			return nil, err
+		}
+		if prefixVal.S == nil {
+			return nil, fmt.Errorf("begins_with predicate value must be a string")
+		}
+		prefix := *prefixVal.S
+
+		return func(entry *core.Entry) (bool, error) {
+			val, ok := entry.Body[key]
+			if !ok {
+				return false, fmt.Errorf("key %s not found", key)
+			}
+
+			return val.BeginsWith(prefix)
+		}, nil
 	}
-	panic("unimplemented")
+
+	panic("unreachable")
 }

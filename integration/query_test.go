@@ -43,7 +43,7 @@ func TestQueryByPartitionKey(t *testing.T) {
 	if ddbErr != nil || baddbErr != nil {
 		t.Errorf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
 	}
-	compareScanOutput(ddbOut, baddbOut, t)
+	compareItems(ddbOut, baddbOut, t)
 	shutdown()
 }
 
@@ -83,7 +83,7 @@ func TestQueryWithFilter(t *testing.T) {
 	if ddbErr != nil || baddbErr != nil {
 		t.Errorf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
 	}
-	compareScanOutput(ddbOut, baddbOut, t)
+	compareItems(ddbOut, baddbOut, t)
 	shutdown()
 }
 
@@ -158,7 +158,7 @@ func TestQueryGSI(t *testing.T) {
 	if ddbErr != nil || baddbErr != nil {
 		t.Errorf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
 	}
-	compareScanOutput(ddbOut, baddbOut, t)
+	compareItems(ddbOut, baddbOut, t)
 	shutdown()
 }
 
@@ -179,24 +179,59 @@ func TestQueryPartitionKeyAndSortKey(t *testing.T) {
 		_, _ = putItemRaw(baddb, item)
 	}
 
-	input := &dynamodb.QueryInput{
-		TableName:              aws.String("movie"),
-		KeyConditionExpression: aws.String("#year = :year AND title = :title"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":year":  &types.AttributeValueMemberN{Value: "2024"},
-			":title": &types.AttributeValueMemberS{Value: "The Shawshank Redemption"},
+	tests := []struct {
+		name             string
+		keyConditionExpr string
+		exprAttrNames    map[string]string
+		exprAttrValues   map[string]types.AttributeValue
+	}{
+		{
+			name:             "partition and sort key equals",
+			keyConditionExpr: "#year = :year AND title = :title",
+			exprAttrNames:    map[string]string{"#year": "year"},
+			exprAttrValues: map[string]types.AttributeValue{
+				":year":  &types.AttributeValueMemberN{Value: "2024"},
+				":title": &types.AttributeValueMemberS{Value: "The Shawshank Redemption"},
+			},
 		},
-		ExpressionAttributeNames: map[string]string{
-			"#year": "year",
+		{
+			name:             "sort key begins_with",
+			keyConditionExpr: "#year = :year AND begins_with(title, :prefix)",
+			exprAttrNames:    map[string]string{"#year": "year"},
+			exprAttrValues: map[string]types.AttributeValue{
+				":year":   &types.AttributeValueMemberN{Value: "2001"},
+				":prefix": &types.AttributeValueMemberS{Value: "The"},
+			},
+		},
+		{
+			name:             "sort key between",
+			keyConditionExpr: "#year = :year AND title BETWEEN :start AND :end",
+			exprAttrNames:    map[string]string{"#year": "year"},
+			exprAttrValues: map[string]types.AttributeValue{
+				":year":  &types.AttributeValueMemberN{Value: "1994"},
+				":start": &types.AttributeValueMemberS{Value: "Forrest Gump"},
+				":end":   &types.AttributeValueMemberS{Value: "Pulp Fiction"},
+			},
 		},
 	}
-	ddbOut, ddbErr := queryAllPages(ddbLocal, input)
-	baddbOut, baddbErr := queryAllPages(baddb, input)
 
-	if ddbErr != nil || baddbErr != nil {
-		t.Errorf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			input := &dynamodb.QueryInput{
+				TableName:                 aws.String("movie"),
+				KeyConditionExpression:    aws.String(tc.keyConditionExpr),
+				ExpressionAttributeNames:  tc.exprAttrNames,
+				ExpressionAttributeValues: tc.exprAttrValues,
+			}
+			ddbOut, ddbErr := queryAllPages(ddbLocal, input)
+			baddbOut, baddbErr := queryAllPages(baddb, input)
+
+			if ddbErr != nil || baddbErr != nil {
+				t.Errorf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
+			}
+			compareItems(ddbOut, baddbOut, t)
+		})
 	}
-	compareScanOutput(ddbOut, baddbOut, t)
 	shutdown()
 }
 
@@ -246,6 +281,12 @@ func queryTestItems() []map[string]types.AttributeValue {
 			"language": &types.AttributeValueMemberS{Value: "English"},
 		},
 		{
+			"year":     &types.AttributeValueMemberN{Value: "1994"},
+			"title":    &types.AttributeValueMemberS{Value: "The Lion King"},
+			"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "8.5"}}},
+			"language": &types.AttributeValueMemberS{Value: "English"},
+		},
+		{
 			"year":     &types.AttributeValueMemberN{Value: "2001"},
 			"title":    &types.AttributeValueMemberS{Value: "Spirited Away"},
 			"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "8.6"}}},
@@ -255,6 +296,12 @@ func queryTestItems() []map[string]types.AttributeValue {
 			"year":     &types.AttributeValueMemberN{Value: "2001"},
 			"title":    &types.AttributeValueMemberS{Value: "The Lord of the Rings: The Fellowship of the Ring"},
 			"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "8.8"}}},
+			"language": &types.AttributeValueMemberS{Value: "English"},
+		},
+		{
+			"year":     &types.AttributeValueMemberN{Value: "2001"},
+			"title":    &types.AttributeValueMemberS{Value: "The Mummy Returns"},
+			"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "6.4"}}},
 			"language": &types.AttributeValueMemberS{Value: "English"},
 		},
 		{

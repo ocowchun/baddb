@@ -128,6 +128,14 @@ func (a AttributeValue) String() string {
 	panic("unreachable")
 }
 
+func (a AttributeValue) BeginsWith(prefix string) (bool, error) {
+	if a.S != nil {
+		return strings.HasPrefix(*a.S, prefix), nil
+	}
+
+	return false, fmt.Errorf("can't perform BeginsWith with type %s", a.Type())
+}
+
 func (a AttributeValue) Compare(other AttributeValue) (int, error) {
 	if a.B != nil {
 		if other.B == nil {

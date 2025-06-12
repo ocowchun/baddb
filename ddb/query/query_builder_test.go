@@ -54,33 +54,38 @@ func TestSimplePredicateExpression_With_SortKey(t *testing.T) {
 		{
 			exp:       "createdYear = :year AND title = :leftTitle",
 			leftTitle: "Star Wars 4",
-			matches:   []bool{true, false, false},
+			matches:   []bool{true, false, false, false},
 		},
 		{
 			exp:       "createdYear = :year AND title > :leftTitle",
 			leftTitle: "Star Wars 4",
-			matches:   []bool{false, true, true},
+			matches:   []bool{false, true, true, true},
 		},
 		{
 			exp:       "createdYear = :year AND title >= :leftTitle",
 			leftTitle: "Star Wars 4",
-			matches:   []bool{true, true, true},
+			matches:   []bool{true, true, true, true},
 		},
 		{
 			exp:       "createdYear = :year AND title < :leftTitle",
 			leftTitle: "Star Wars 5",
-			matches:   []bool{true, false, false},
+			matches:   []bool{true, false, false, false},
 		},
 		{
 			exp:       "createdYear = :year AND title <= :leftTitle",
 			leftTitle: "Star Wars 5",
-			matches:   []bool{true, true, false},
+			matches:   []bool{true, true, false, false},
 		},
 		{
 			exp:        "createdYear = :year AND title BETWEEN :leftTitle AND :rightTitle",
 			leftTitle:  "Star Wars 5",
 			rightTitle: "Star Wars 6",
-			matches:    []bool{false, true, true},
+			matches:    []bool{false, true, true, false},
+		},
+		{
+			exp:       "createdYear = :year AND begins_with(title, :leftTitle)",
+			leftTitle: "Star Wars",
+			matches:   []bool{true, true, true, false},
 		},
 	}
 
@@ -103,6 +108,13 @@ func TestSimplePredicateExpression_With_SortKey(t *testing.T) {
 			Body: map[string]core.AttributeValue{
 				"title": {
 					S: aws.String("Star Wars 6"),
+				},
+			},
+		},
+		{
+			Body: map[string]core.AttributeValue{
+				"title": {
+					S: aws.String("This is the End"),
 				},
 			},
 		},

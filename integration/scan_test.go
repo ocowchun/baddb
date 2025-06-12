@@ -5,7 +5,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"sort"
 	"testing"
 )
 
@@ -90,7 +89,7 @@ func TestScanBehavior(t *testing.T) {
 		t.Errorf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
 	}
 
-	compareScanOutput(ddbItems, baddbItems, t)
+	compareItems(ddbItems, baddbItems, t)
 
 	shutdown()
 }
@@ -136,7 +135,7 @@ func TestScanBehaviorWithFilter(t *testing.T) {
 		t.Errorf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
 	}
 
-	compareScanOutput(ddbItems, baddbItems, t)
+	compareItems(ddbItems, baddbItems, t)
 
 	shutdown()
 }
@@ -222,7 +221,7 @@ func TestScanBehaviorGSI(t *testing.T) {
 		t.Errorf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
 	}
 
-	compareScanOutput(ddbItems, baddbItems, t)
+	compareItems(ddbItems, baddbItems, t)
 	shutdown()
 }
 
@@ -271,7 +270,7 @@ func TestScanBehaviorWithSegments(t *testing.T) {
 	ddbItems := collectItems(ddbLocal)
 	baddbItems := collectItems(baddb)
 
-	compareScanOutput(ddbItems, baddbItems, t)
+	compareItems(ddbItems, baddbItems, t)
 	shutdown()
 }
 
@@ -310,37 +309,4 @@ func scanAllPages(client *dynamodb.Client, baseScanInput *dynamodb.ScanInput) ([
 		lastKey = out.LastEvaluatedKey
 	}
 	return allItems, nil
-}
-
-func scanTable(client *dynamodb.Client) (*dynamodb.ScanOutput, error) {
-	input := &dynamodb.ScanInput{
-		TableName: aws.String("movie"),
-	}
-	return client.Scan(context.TODO(), input)
-}
-
-func compareScanOutput(ddbItems, baddbItems []map[string]types.AttributeValue, t *testing.T) {
-	if len(ddbItems) != len(baddbItems) {
-		t.Errorf("Scan item count differ: ddbLocal=%d, baddb=%d", len(ddbItems), len(baddbItems))
-		return
-	}
-
-	sortItems(ddbItems)
-	sortItems(baddbItems)
-	for i := range ddbItems {
-		compareItem(ddbItems[i], baddbItems[i], t)
-	}
-}
-
-func sortItems(items []map[string]types.AttributeValue) {
-	sort.Slice(items, func(i, j int) bool {
-		yearI := items[i]["year"].(*types.AttributeValueMemberN).Value
-		yearJ := items[j]["year"].(*types.AttributeValueMemberN).Value
-		if yearI != yearJ {
-			return yearI < yearJ
-		}
-		titleI := items[i]["title"].(*types.AttributeValueMemberS).Value
-		titleJ := items[j]["title"].(*types.AttributeValueMemberS).Value
-		return titleI < titleJ
-	})
 }
