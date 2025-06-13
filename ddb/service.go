@@ -759,6 +759,22 @@ func (svc *Service) buildTablePrimaryKey(entry *core.Entry, table *core.TableMet
 	return primaryKey, nil
 }
 
+type TransactionCanceledException struct {
+	rawError            error
+	CancellationReasons []CancellationReason
+}
+
+type CancellationReason struct {
+	Code    string
+	Message string
+}
+
+func (e *TransactionCanceledException) Error() string {
+	// TODO: improve error message
+	var reason = "ConditionalCheckFailed"
+	return fmt.Sprintf("Transaction cancelled, please refer cancellation reasons for specific reasons [%s]", reason)
+}
+
 func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.TransactWriteItemsInput) (*dynamodb.TransactWriteItemsOutput, error) {
 	// https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_TransactWriteItems.html
 	svc.tableLock.RLock()
@@ -769,7 +785,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 		return nil, err
 	}
 
-	txn, err := svc.storage.BeginTxn(false)
+	txn, err := svc.storage.BeginTxn()
 	if err != nil {
 		return nil, err
 	}
@@ -860,7 +876,15 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 			}
 			err = svc.storage.PutWithTransaction(req, txn)
 			if err != nil {
-				return nil, err
+				return nil, &TransactionCanceledException{
+					rawError: err,
+					CancellationReasons: []CancellationReason{
+						{
+							Code:    "ConditionalCheckFailed",
+							Message: "The conditional request failed",
+						},
+					},
+				}
 			}
 		} else if writeItem.Delete != nil {
 			deleteReq := writeItem.Delete
@@ -919,7 +943,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 
 			_, err = svc.storage.UpdateWithTransaction(req, txn)
 			if err != nil {
-				return nil, err
+				return nil, &TransactionCanceledException{rawError: err}
 			}
 		}
 

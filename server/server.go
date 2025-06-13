@@ -23,12 +23,19 @@ type ErrorResponse struct {
 	Message string `json:"Message"`
 }
 
+type TransactionCanceledErrorResponse struct {
+	Type                string                   `json:"__type"`
+	Message             string                   `json:"Message"`
+	CancellationReasons []ddb.CancellationReason `json:"CancellationReasons"`
+}
+
 func handleDdbError(w http.ResponseWriter, outputErr error) {
 	var resourceInUseException *types.ResourceInUseException
 	var resourceNotFoundException *types.ResourceNotFoundException
 	var validationException *ddb.ValidationException
 	var provisionedThroughputExceededException *types.ProvisionedThroughputExceededException
 	var conditionalCheckFailedException *inner_storage.ConditionalCheckFailedException
+	var transactionCanceledException *ddb.TransactionCanceledException
 	log.Println("handle err", outputErr)
 	switch {
 
@@ -130,6 +137,28 @@ func handleDdbError(w http.ResponseWriter, outputErr error) {
 		}
 
 		return
+	case errors.As(outputErr, &transactionCanceledException):
+		w.WriteHeader(http.StatusBadRequest)
+
+		errResponse := TransactionCanceledErrorResponse{
+			Type:                "TransactionCanceledException",
+			Message:             transactionCanceledException.Error(),
+			CancellationReasons: transactionCanceledException.CancellationReasons,
+		}
+
+		bs, err := json.Marshal(errResponse)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, err = w.Write(bs)
+		if err != nil {
+			log.Printf("Error writing response: %v", err)
+			return
+		}
+
+		return
+
 	default:
 		w.WriteHeader(http.StatusInternalServerError)
 

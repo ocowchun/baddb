@@ -37,7 +37,7 @@ type EntryWrapper struct {
 
 type InnerStorage struct {
 	db             *sql.DB
-	rwMutex        sync.RWMutex
+	mutex          sync.Mutex
 	TableMetaDatas map[string]*InnerTableMetadata
 	counter        atomic.Int32
 }
@@ -164,7 +164,7 @@ func (s *InnerStorage) CreateTable(meta *core.TableMetaData) error {
 }
 
 func (s *InnerStorage) QueryItemCount(tableName string) (int64, error) {
-	txn, err := s.BeginTxn(true)
+	txn, err := s.BeginTxn()
 	if err != nil {
 		return 0, err
 	}
@@ -175,16 +175,32 @@ func (s *InnerStorage) QueryItemCount(tableName string) (int64, error) {
 		return 0, fmt.Errorf("table %s not found", tableName)
 	}
 
-	stmt, err := txn.tx.Prepare("select count(1) from " + tableMetadata.Name)
+	queryStmt := "select body from " + tableMetadata.Name
+	args := make([]interface{}, 0)
+	rows, err := txn.tx.Query(queryStmt, args...)
 	if err != nil {
 		return 0, err
 	}
-	defer stmt.Close()
 
 	var count int64
-	err = stmt.QueryRow().Scan(&count)
-	if err != nil {
-		return 0, err
+	readTs := time.Now()
+	for rows.Next() {
+		var body []byte
+		err = rows.Scan(&body)
+		if err != nil {
+			return 0, err
+		}
+
+		var tuple Tuple
+		err = json.Unmarshal(body, &tuple)
+		if err != nil {
+			return 0, err
+		}
+
+		entry := tuple.getEntry(true, readTs, false)
+		if entry != nil {
+			count++
+		}
 	}
 
 	return count, txn.Commit()
@@ -194,53 +210,38 @@ type Txn struct {
 	tx       *sql.Tx
 	s        *InnerStorage
 	isLocked atomic.Bool
-	readOnly bool
 }
 
 func (txn *Txn) Commit() error {
-	txn.unlock()
+	defer txn.unlock()
 
 	return txn.tx.Commit()
 }
 func (txn *Txn) unlock() {
 	for txn.isLocked.Load() {
-		if txn.isLocked.CompareAndSwap(true, false) {
-			if txn.readOnly {
-				txn.s.rwMutex.RUnlock()
-			} else {
-				txn.s.rwMutex.Unlock()
-			}
-		}
+		txn.s.mutex.Unlock()
+		txn.isLocked.Store(false)
 	}
 }
 
 func (txn *Txn) Rollback() error {
-	txn.unlock()
+	defer txn.unlock()
 
 	return txn.tx.Rollback()
 }
 
-func (s *InnerStorage) BeginTxn(readOnly bool) (*Txn, error) {
-	if readOnly {
-		s.rwMutex.RLock()
-	} else {
-		s.rwMutex.Lock()
-	}
+func (s *InnerStorage) BeginTxn() (*Txn, error) {
+	s.mutex.Lock()
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		if readOnly {
-			s.rwMutex.RUnlock()
-		} else {
-			s.rwMutex.Unlock()
-		}
+		s.mutex.Unlock()
 		return nil, err
 	}
 
 	txn := &Txn{
-		tx:       tx,
-		s:        s,
-		readOnly: readOnly,
+		tx: tx,
+		s:  s,
 	}
 	txn.isLocked.Store(true)
 
@@ -256,7 +257,7 @@ type PutRequest struct {
 const METADATA_TABLE_NAME = "baddb_table_metadata"
 
 func (s *InnerStorage) Put(req *PutRequest) error {
-	txn, err := s.BeginTxn(false)
+	txn, err := s.BeginTxn()
 	if err != nil {
 		return err
 	}
@@ -352,7 +353,7 @@ type UpdateRequest struct {
 }
 
 func (s *InnerStorage) Update(req *UpdateRequest) (*UpdateResponse, error) {
-	txn, err := s.BeginTxn(false)
+	txn, err := s.BeginTxn()
 	if err != nil {
 		return nil, err
 	}
@@ -454,7 +455,7 @@ type DeleteRequest struct {
 }
 
 func (s *InnerStorage) Delete(req *DeleteRequest) error {
-	txn, err := s.BeginTxn(false)
+	txn, err := s.BeginTxn()
 	if err != nil {
 		return err
 	}
@@ -795,7 +796,7 @@ type GetRequest struct {
 }
 
 func (s *InnerStorage) Get(req *GetRequest) (*core.Entry, error) {
-	txn, err := s.BeginTxn(true)
+	txn, err := s.BeginTxn()
 	if err != nil {
 		return nil, err
 	}
@@ -872,8 +873,11 @@ var (
 )
 
 func (s *InnerStorage) Query(req *query.Query) (*QueryResponse, error) {
-	s.rwMutex.RLock()
-	defer s.rwMutex.RUnlock()
+	txn, err := s.BeginTxn()
+	if err != nil {
+		return nil, err
+	}
+	defer txn.Rollback()
 
 	tableMetadata, ok := s.TableMetaDatas[req.TableName]
 	if !ok {
@@ -916,17 +920,6 @@ func (s *InnerStorage) Query(req *query.Query) (*QueryResponse, error) {
 		queryStmt += " DESC"
 		queryStmt += ", primary_key DESC "
 	}
-
-	queryStmt += " LIMIT ?"
-	// workaround to get enough result in case filter and deleted Entries
-	// TODO: use more proper way to get enough result
-	args = append(args, req.Limit*3)
-
-	txn, err := s.BeginTxn(true)
-	if err != nil {
-		return nil, err
-	}
-	defer txn.Rollback()
 
 	readTs, err := s.readTs(req.TableName, isGsi)
 	if err != nil {
@@ -1005,8 +998,11 @@ type ScanResponse struct {
 
 func (s *InnerStorage) Scan(req *scan.Request) (*ScanResponse, error) {
 	// TODO: refactor duplicate code with Query
-	s.rwMutex.RLock()
-	defer s.rwMutex.RUnlock()
+	txn, err := s.BeginTxn()
+	if err != nil {
+		return nil, err
+	}
+	defer txn.Rollback()
 
 	tableMetadata, ok := s.TableMetaDatas[req.TableName]
 	if !ok {
@@ -1041,12 +1037,6 @@ func (s *InnerStorage) Scan(req *scan.Request) (*ScanResponse, error) {
 	}
 
 	queryStmt += " ORDER BY primary_key"
-
-	txn, err := s.BeginTxn(true)
-	if err != nil {
-		return nil, err
-	}
-	defer txn.Rollback()
 
 	readTs, err := s.readTs(req.TableName, isGsi)
 	if err != nil {
