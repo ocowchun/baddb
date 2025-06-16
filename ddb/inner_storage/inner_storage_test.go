@@ -98,9 +98,15 @@ func TestInnerStorageQueryWithGsiProjections(t *testing.T) {
 		gsiSortKeyName := "gsi1SortKey"
 		gsiSettings := []core.GlobalSecondaryIndexSetting{
 			{
-				IndexName:        &gsiName,
-				PartitionKeyName: &gsiPartitionKeyName,
-				SortKeyName:      &gsiSortKeyName,
+				IndexName: &gsiName,
+				PartitionKeySchema: &core.KeySchema{
+					AttributeName: gsiPartitionKeyName,
+					AttributeType: core.ScalarAttributeTypeS,
+				},
+				SortKeySchema: &core.KeySchema{
+					AttributeName: gsiSortKeyName,
+					AttributeType: core.ScalarAttributeTypeS,
+				},
 				ProjectionType:   testCase.projectionType,
 				NonKeyAttributes: testCase.attributeNames,
 			},
@@ -785,9 +791,12 @@ func TestInnerStorageQueryWithGsiNoSortKey(t *testing.T) {
 	gsiPartitionKeyName := "gsi1PartitionKey"
 	gsiSettings := []core.GlobalSecondaryIndexSetting{
 		{
-			IndexName:        &gsiName,
-			PartitionKeyName: &gsiPartitionKeyName,
-			ProjectionType:   core.PROJECTION_TYPE_ALL,
+			IndexName: &gsiName,
+			PartitionKeySchema: &core.KeySchema{
+				AttributeName: gsiPartitionKeyName,
+				AttributeType: core.ScalarAttributeTypeS,
+			},
+			ProjectionType: core.PROJECTION_TYPE_ALL,
 		},
 	}
 	storage := createTestInnerStorageWithGSI(gsiSettings)
@@ -852,10 +861,16 @@ func TestInnerStorageQueryWithGsi(t *testing.T) {
 	gsiSortKeyName := "gsi1SortKey"
 	gsiSettings := []core.GlobalSecondaryIndexSetting{
 		{
-			IndexName:        &gsiName,
-			PartitionKeyName: &gsiPartitionKeyName,
-			SortKeyName:      &gsiSortKeyName,
-			ProjectionType:   core.PROJECTION_TYPE_ALL,
+			IndexName: &gsiName,
+			PartitionKeySchema: &core.KeySchema{
+				AttributeName: gsiPartitionKeyName,
+				AttributeType: core.ScalarAttributeTypeS,
+			},
+			SortKeySchema: &core.KeySchema{
+				AttributeName: gsiSortKeyName,
+				AttributeType: core.ScalarAttributeTypeS,
+			},
+			ProjectionType: core.PROJECTION_TYPE_ALL,
 		},
 	}
 	storage := createTestInnerStorageWithGSI(gsiSettings)
@@ -1428,10 +1443,16 @@ func TestInnerStorageScanGsi(t *testing.T) {
 	gsiSortKeyName := "gsi1SortKey"
 	gsiSettings := []core.GlobalSecondaryIndexSetting{
 		{
-			IndexName:        &gsiName,
-			PartitionKeyName: &gsiPartitionKeyName,
-			SortKeyName:      &gsiSortKeyName,
-			ProjectionType:   core.PROJECTION_TYPE_ALL,
+			IndexName: &gsiName,
+			PartitionKeySchema: &core.KeySchema{
+				AttributeName: gsiPartitionKeyName,
+				AttributeType: core.ScalarAttributeTypeS,
+			},
+			SortKeySchema: &core.KeySchema{
+				AttributeName: gsiSortKeyName,
+				AttributeType: core.ScalarAttributeTypeS,
+			},
+			ProjectionType: core.PROJECTION_TYPE_ALL,
 		},
 	}
 	storage := createTestInnerStorageWithGSI(gsiSettings)

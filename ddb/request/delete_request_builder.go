@@ -3,7 +3,7 @@ package request
 import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	condition2 "github.com/ocowchun/baddb/ddb/condition"
+	"github.com/ocowchun/baddb/ddb/condition"
 	"github.com/ocowchun/baddb/ddb/core"
 	"github.com/ocowchun/baddb/ddb/inner_storage"
 )
@@ -22,13 +22,17 @@ func (b *DeleteRequestBuilder) Build() (*inner_storage.DeleteRequest, error) {
 	}
 	tableName := *b.TableName
 
-	var condition *condition2.Condition
-	var err error
+	entry, err := core.NewEntryFromItem(b.Key)
+	if err != nil {
+		return nil, err
+	}
+
+	var cond *condition.Condition
 	if b.ConditionExpression != nil {
-		condition, err = condition2.BuildCondition(
+		cond, err = condition.BuildCondition(
 			*b.ConditionExpression,
 			b.ExpressionAttributeNames,
-			core.NewEntryFromItem(b.ExpressionAttributeValues).Body,
+			entry.Body,
 		)
 		if err != nil {
 			return nil, &core.InvalidConditionExpressionError{
@@ -37,11 +41,10 @@ func (b *DeleteRequestBuilder) Build() (*inner_storage.DeleteRequest, error) {
 		}
 	}
 
-	entry := core.NewEntryFromItem(b.Key)
 	req := &inner_storage.DeleteRequest{
 		Entry:     entry,
 		TableName: tableName,
-		Condition: condition,
+		Condition: cond,
 	}
 
 	return req, nil

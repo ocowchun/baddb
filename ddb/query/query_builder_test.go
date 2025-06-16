@@ -25,6 +25,7 @@ func TestSimplePredicateExpression(t *testing.T) {
 		TableMetadata: &core.TableMetaData{
 			PartitionKeySchema: &core.KeySchema{
 				AttributeName: "createdYear",
+				AttributeType: core.ScalarAttributeTypeN,
 			},
 		},
 	}
@@ -145,9 +146,11 @@ func TestSimplePredicateExpression_With_SortKey(t *testing.T) {
 			TableMetadata: &core.TableMetaData{
 				PartitionKeySchema: &core.KeySchema{
 					AttributeName: "createdYear",
+					AttributeType: core.ScalarAttributeTypeN,
 				},
 				SortKeySchema: &core.KeySchema{
 					AttributeName: "title",
+					AttributeType: core.ScalarAttributeTypeS,
 				},
 			},
 		}
@@ -177,7 +180,7 @@ func TestSimplePredicateExpression_With_SortKey(t *testing.T) {
 }
 
 func TestSimplePredicateExpression_With_GSI(t *testing.T) {
-	exp := "regionCode= :regionCode"
+	exp := "regionCode = :regionCode"
 	keyConditionExpression, err := expression.ParseKeyConditionExpression(exp)
 	if err != nil {
 		t.Fatalf("expect no error, got %v", err)
@@ -194,12 +197,19 @@ func TestSimplePredicateExpression_With_GSI(t *testing.T) {
 		TableMetadata: &core.TableMetaData{
 			PartitionKeySchema: &core.KeySchema{
 				AttributeName: "year",
+				AttributeType: core.ScalarAttributeTypeN,
 			},
 			GlobalSecondaryIndexSettings: []core.GlobalSecondaryIndexSetting{
 				{
-					IndexName:        &indexName,
-					PartitionKeyName: aws.String("regionCode"),
-					SortKeyName:      aws.String("countryCode"),
+					IndexName: &indexName,
+					PartitionKeySchema: &core.KeySchema{
+						AttributeName: "regionCode",
+						AttributeType: core.ScalarAttributeTypeS,
+					},
+					SortKeySchema: &core.KeySchema{
+						AttributeName: "countryCode",
+						AttributeType: core.ScalarAttributeTypeS,
+					},
 				},
 			},
 		},

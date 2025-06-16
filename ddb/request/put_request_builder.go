@@ -23,12 +23,20 @@ func (b *PutRequestBuilder) Build() (*inner_storage.PutRequest, error) {
 	tableName := *b.TableName
 
 	var cond *condition.Condition
-	var err error
+	entry, err := core.NewEntryFromItem(b.Item)
+	if err != nil {
+		return nil, err
+	}
+
 	if b.ConditionExpression != nil {
+		attrVals, err := core.TransformAttributeValueMap(b.ExpressionAttributeValues)
+		if err != nil {
+			return nil, err
+		}
 		cond, err = condition.BuildCondition(
 			*b.ConditionExpression,
 			b.ExpressionAttributeNames,
-			core.NewEntryFromItem(b.ExpressionAttributeValues).Body,
+			attrVals,
 		)
 		if err != nil {
 			return nil, &core.InvalidConditionExpressionError{
@@ -36,7 +44,6 @@ func (b *PutRequestBuilder) Build() (*inner_storage.PutRequest, error) {
 			}
 		}
 	}
-	entry := core.NewEntryFromItem(b.Item)
 
 	req := &inner_storage.PutRequest{
 		Entry:     entry,

@@ -557,6 +557,8 @@ func compareValue(leftVal core.AttributeValue, rightVal core.AttributeValue, ope
 	switch operator {
 	case "=":
 		return compared == 0, nil
+	case "<>":
+		return compared != 0, nil
 	case "<":
 		return compared < 0, nil
 	case "<=":

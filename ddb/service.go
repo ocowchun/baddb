@@ -67,17 +67,48 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 	now := time.Now()
 	var partitionKeySchema *core.KeySchema
 	var sortKeySchema *core.KeySchema
+
+	var attributeDefinitionMap = make(map[string]types.AttributeDefinition)
+	for _, attrDef := range input.AttributeDefinitions {
+		attributeDefinitionMap[*attrDef.AttributeName] = attrDef
+	}
+
 	for _, keySchema := range input.KeySchema {
+		def, ok := attributeDefinitionMap[*keySchema.AttributeName]
+		if !ok {
+			msg := fmt.Sprintf("%s not found in attribute definitions", *keySchema.AttributeName)
+			err := &ValidationException{
+				Message: msg,
+			}
+			return nil, err
+		}
+		attrType, err := core.GetScalarAttributeType(def)
+		if err != nil {
+			err := &ValidationException{
+				Message: err.Error(),
+			}
+			return nil, err
+		}
+
 		if keySchema.KeyType == types.KeyTypeHash {
 			partitionKeySchema = &core.KeySchema{
 				AttributeName: *keySchema.AttributeName,
+				AttributeType: attrType,
 			}
-		} else {
+		} else if keySchema.KeyType == types.KeyTypeRange {
 			sortKeySchema = &core.KeySchema{
 				AttributeName: *keySchema.AttributeName,
+				AttributeType: attrType,
 			}
+		} else {
+			msg := fmt.Sprintf("Unknown key type %s for attribute %s", keySchema.KeyType, *keySchema.AttributeName)
+			err := &ValidationException{
+				Message: msg,
+			}
+			return nil, err
 		}
 	}
+
 	if partitionKeySchema == nil {
 		msg := "Partition key must be present"
 		err := &ValidationException{
@@ -93,13 +124,35 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 			nonKeyAttributes[i] = v
 		}
 
-		var partitionKeyName *string
-		var sortKeyName *string
+		var partitionKey *core.KeySchema
+		var sortKey *core.KeySchema
 		for _, key := range gsi.KeySchema {
+			def, ok := attributeDefinitionMap[*key.AttributeName]
+			if !ok {
+				msg := fmt.Sprintf("%s not found in attribute definitions", *key.AttributeName)
+				err := &ValidationException{
+					Message: msg,
+				}
+				return nil, err
+			}
+			attrType, err := core.GetScalarAttributeType(def)
+			if err != nil {
+				err := &ValidationException{
+					Message: err.Error(),
+				}
+				return nil, err
+			}
+
 			if key.KeyType == types.KeyTypeHash {
-				partitionKeyName = key.AttributeName
+				partitionKey = &core.KeySchema{
+					AttributeName: *key.AttributeName,
+					AttributeType: attrType,
+				}
 			} else if key.KeyType == types.KeyTypeRange {
-				sortKeyName = key.AttributeName
+				sortKey = &core.KeySchema{
+					AttributeName: *key.AttributeName,
+					AttributeType: attrType,
+				}
 			}
 		}
 		var projectionType core.ProjectionType
@@ -113,11 +166,11 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 		}
 
 		gsiSettings[i] = core.GlobalSecondaryIndexSetting{
-			IndexName:        gsi.IndexName,
-			PartitionKeyName: partitionKeyName,
-			SortKeyName:      sortKeyName,
-			NonKeyAttributes: nonKeyAttributes,
-			ProjectionType:   projectionType,
+			IndexName:          gsi.IndexName,
+			PartitionKeySchema: partitionKey,
+			SortKeySchema:      sortKey,
+			NonKeyAttributes:   nonKeyAttributes,
+			ProjectionType:     projectionType,
 		}
 	}
 	// api error ValidationException:
@@ -444,8 +497,13 @@ func (svc *Service) GetItem(ctx context.Context, input *dynamodb.GetItemInput) (
 			consistentRead = *input.ConsistentRead
 		}
 
+		key, err := core.NewEntryFromItem(input.Key)
+		if err != nil {
+			return nil, err
+		}
+
 		req := &inner_storage.GetRequest{
-			Entry:          core.NewEntryFromItem(input.Key),
+			Entry:          key,
 			ConsistentRead: consistentRead,
 			TableName:      tableName,
 		}
@@ -519,9 +577,11 @@ func (svc *Service) Query(ctx context.Context, input *dynamodb.QueryInput) (*dyn
 		}
 		return nil, err
 	}
-	expressionAttributeValues := make(map[string]core.AttributeValue)
-	for k, v := range input.ExpressionAttributeValues {
-		expressionAttributeValues[k] = core.TransformDdbAttributeValue(v)
+
+	expressionAttributeValues, err := core.TransformAttributeValueMap(input.ExpressionAttributeValues)
+	if err != nil {
+		message := fmt.Sprintf("ExpressionAttributeValues contains invalid value: %s", err.Error())
+		return nil, &ValidationException{Message: message}
 	}
 
 	builder := query.QueryBuilder{
@@ -539,6 +599,9 @@ func (svc *Service) Query(ctx context.Context, input *dynamodb.QueryInput) (*dyn
 
 	queryReq, err := builder.BuildQuery()
 	if err != nil {
+		err = &ValidationException{
+			Message: err.Error(),
+		}
 		return nil, err
 	}
 	queryReq.TableName = tableName
@@ -654,7 +717,6 @@ func (svc *Service) validateTransactWriteItemsInput(input *dynamodb.TransactWrit
 	for _, writeItem := range input.TransactItems {
 		var pk *inner_storage.PrimaryKey
 		var tableName string
-		var err error
 		if writeItem.ConditionCheck != nil {
 			conditionCheck := writeItem.ConditionCheck
 
@@ -666,7 +728,12 @@ func (svc *Service) validateTransactWriteItemsInput(input *dynamodb.TransactWrit
 					Message: &msg,
 				}
 			}
-			pk, err = svc.buildTablePrimaryKey(core.NewEntryFromItem(conditionCheck.Key), tableMetadata)
+			entry, err := core.NewEntryFromItem(conditionCheck.Key)
+			if err != nil {
+				return err
+			}
+
+			pk, err = svc.buildTablePrimaryKey(entry, tableMetadata)
 			if err != nil {
 				return err
 			}
@@ -681,7 +748,12 @@ func (svc *Service) validateTransactWriteItemsInput(input *dynamodb.TransactWrit
 					Message: &msg,
 				}
 			}
-			pk, err = svc.buildTablePrimaryKey(core.NewEntryFromItem(put.Item), tableMetadata)
+
+			entry, err := core.NewEntryFromItem(put.Item)
+			if err != nil {
+				return err
+			}
+			pk, err = svc.buildTablePrimaryKey(entry, tableMetadata)
 			if err != nil {
 				return err
 			}
@@ -696,7 +768,12 @@ func (svc *Service) validateTransactWriteItemsInput(input *dynamodb.TransactWrit
 					Message: &msg,
 				}
 			}
-			pk, err = svc.buildTablePrimaryKey(core.NewEntryFromItem(deleteReq.Key), tableMetadata)
+
+			entry, err := core.NewEntryFromItem(deleteReq.Key)
+			if err != nil {
+				return err
+			}
+			pk, err = svc.buildTablePrimaryKey(entry, tableMetadata)
 			if err != nil {
 				return err
 			}
@@ -711,7 +788,11 @@ func (svc *Service) validateTransactWriteItemsInput(input *dynamodb.TransactWrit
 					Message: &msg,
 				}
 			}
-			pk, err = svc.buildTablePrimaryKey(core.NewEntryFromItem(update.Key), tableMetadata)
+			entry, err := core.NewEntryFromItem(update.Key)
+			if err != nil {
+				return err
+			}
+			pk, err = svc.buildTablePrimaryKey(entry, tableMetadata)
 			if err != nil {
 				return err
 			}
@@ -810,10 +891,16 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				}
 			}
 
+			expressionAttributeValues, err := core.TransformAttributeValueMap(conditionCheck.ExpressionAttributeValues)
+			if err != nil {
+				return nil, &ValidationException{
+					Message: err.Error(),
+				}
+			}
 			cond, err = condition.BuildCondition(
 				*conditionCheck.ConditionExpression,
 				conditionCheck.ExpressionAttributeNames,
-				core.NewEntryFromItem(conditionCheck.ExpressionAttributeValues).Body,
+				expressionAttributeValues,
 			)
 			if err != nil {
 				return nil, &ValidationException{
@@ -821,7 +908,13 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				}
 			}
 
-			key := core.NewEntryFromItem(conditionCheck.Key)
+			key, err := core.NewEntryFromItem(conditionCheck.Key)
+			if err != nil {
+				return nil, &ValidationException{
+					Message: err.Error(),
+				}
+			}
+
 			req := &inner_storage.GetRequest{
 				Entry:          key,
 				TableName:      tableName,
@@ -973,10 +1066,17 @@ func (svc *Service) Scan(ctx context.Context, input *dynamodb.ScanInput) (*dynam
 		return nil, err
 	}
 
+	expressionAttributeValues, err := core.TransformAttributeValueMap(input.ExpressionAttributeValues)
+	if err != nil {
+		return nil, &ValidationException{
+			Message: err.Error(),
+		}
+	}
+
 	scanReqBuilder := &scan.RequestBuilder{
 		FilterExpressionStr:       input.FilterExpression,
 		ExpressionAttributeNames:  input.ExpressionAttributeNames,
-		ExpressionAttributeValues: core.NewEntryFromItem(input.ExpressionAttributeValues).Body,
+		ExpressionAttributeValues: expressionAttributeValues,
 		TableMetadata:             tableMetadata,
 		ExclusiveStartKey:         input.ExclusiveStartKey,
 		ConsistentRead:            input.ConsistentRead,

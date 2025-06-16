@@ -113,7 +113,7 @@ func (b *QueryBuilder) BuildQuery() (*Query, error) {
 	}
 
 	if query.PartitionKey == nil {
-		return nil, fmt.Errorf("partitionKey %s must be specified", *b.expectedPartitionKey())
+		return nil, fmt.Errorf("Query condition missed key schema element")
 	}
 
 	if b.FilterExpressionStr != nil {
@@ -132,7 +132,11 @@ func (b *QueryBuilder) BuildQuery() (*Query, error) {
 		bs := make([]byte, 0)
 		tablePartitionKey := b.TableMetadata.PartitionKeySchema.AttributeName
 		if val, ok := b.ExclusiveStartKey[tablePartitionKey]; ok {
-			bs = core.TransformDdbAttributeValue(val).Bytes()
+			attrVal, err := core.TransformDdbAttributeValue(val)
+			if err != nil {
+				return nil, err
+			}
+			bs = attrVal.Bytes()
 		} else {
 			return nil, fmt.Errorf("partition key %s not found in ExclusiveStartKey", tablePartitionKey)
 		}
@@ -140,8 +144,13 @@ func (b *QueryBuilder) BuildQuery() (*Query, error) {
 		if b.TableMetadata.SortKeySchema != nil {
 			tableSortKey := b.TableMetadata.SortKeySchema.AttributeName
 			if val, ok := b.ExclusiveStartKey[tableSortKey]; ok {
+				attrVal, err := core.TransformDdbAttributeValue(val)
+				if err != nil {
+					return nil, err
+				}
+
 				bs = append(bs, []byte("|")...)
-				bs = append(bs, core.TransformDdbAttributeValue(val).Bytes()...)
+				bs = append(bs, attrVal.Bytes()...)
 			} else {
 				return nil, fmt.Errorf("sort key %s not found in ExclusiveStartKey", tableSortKey)
 			}
@@ -162,11 +171,20 @@ func (b *QueryBuilder) extractPartitionKeyPrefix(expression ast.PredicateExpress
 		if err != nil {
 			return nil, fmt.Errorf("failed to cast to SimplePredicateExpression")
 		}
-		if key == *b.expectedPartitionKey() && pred.Operator == "=" {
+		if pred.Operator != "=" {
+			return nil, fmt.Errorf("Query key condition not supported")
+		}
+
+		if key == *b.expectedPartitionKey() {
 			val, err := b.extractAttributeValue(pred.Value)
 			if err != nil {
 				return nil, fmt.Errorf("failed to extract attribute value")
 			}
+			keySchema := b.TableMetadata.FindKeySchema(key)
+			if keySchema == nil || !val.IsScalarAttributeType(keySchema.AttributeType) {
+				return nil, fmt.Errorf("One or more parameter values were invalid: Condition parameter type does not match schema type")
+			}
+
 			return val.Bytes(), nil
 		}
 	}
@@ -203,7 +221,7 @@ func (b *QueryBuilder) expectedPartitionKey() *string {
 	if b.IndexName != nil {
 		for _, gsi := range b.TableMetadata.GlobalSecondaryIndexSettings {
 			if *gsi.IndexName == *b.IndexName {
-				return gsi.PartitionKeyName
+				return gsi.PartitionKeyName()
 			}
 		}
 		log.Fatalf("index %s not found", *b.IndexName)
@@ -215,7 +233,7 @@ func (b *QueryBuilder) expectedSortKey() *string {
 	if b.IndexName != nil {
 		for _, gsi := range b.TableMetadata.GlobalSecondaryIndexSettings {
 			if *gsi.IndexName == *b.IndexName {
-				return gsi.SortKeyName
+				return gsi.SortKeyName()
 			}
 		}
 		log.Fatalf("index %s not found", *b.IndexName)

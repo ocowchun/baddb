@@ -96,6 +96,11 @@ func TestParseConditionExpression(t *testing.T) {
 		expected string
 	}{
 		{"attributeName = :attributeValue", "attributeName = :attributeValue"},
+		{"attributeName <> :attributeValue", "attributeName <> :attributeValue"},
+		{"attributeName < :attributeValue", "attributeName < :attributeValue"},
+		{"attributeName <= :attributeValue", "attributeName <= :attributeValue"},
+		{"attributeName > :attributeValue", "attributeName > :attributeValue"},
+		{"attributeName >= :attributeValue", "attributeName >= :attributeValue"},
 		{"attributeName BETWEEN :value1 AND :value2", "attributeName BETWEEN :value1 AND :value2"},
 		{"attributeName IN (:value1, :value2, :value3)", "attributeName IN (:value1, :value2, :value3)"},
 		{"attribute_exists(attributeName)", "attribute_exists(attributeName)"},

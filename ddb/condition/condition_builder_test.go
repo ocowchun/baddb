@@ -36,6 +36,10 @@ func TestBuildComparatorCondition(t *testing.T) {
 			expected: []bool{false, true, false},
 		},
 		{
+			exp:      "createdYear <> :createdYear",
+			expected: []bool{true, false, true},
+		},
+		{
 			exp:      "createdYear < :createdYear",
 			expected: []bool{true, false, false},
 		},

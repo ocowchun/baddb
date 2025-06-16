@@ -72,7 +72,11 @@ func (b *RequestBuilder) Build() (*Request, error) {
 		bs := make([]byte, 0)
 		tablePartitionKey := b.TableMetadata.PartitionKeySchema.AttributeName
 		if val, ok := b.ExclusiveStartKey[tablePartitionKey]; ok {
-			bs = core.TransformDdbAttributeValue(val).Bytes()
+			attrVal, err := core.TransformDdbAttributeValue(val)
+			if err != nil {
+				return nil, err
+			}
+			bs = attrVal.Bytes()
 		} else {
 			return nil, fmt.Errorf("partition key %s not found in ExclusiveStartKey", tablePartitionKey)
 		}
@@ -80,8 +84,13 @@ func (b *RequestBuilder) Build() (*Request, error) {
 		if b.TableMetadata.SortKeySchema != nil {
 			tableSortKey := b.TableMetadata.SortKeySchema.AttributeName
 			if val, ok := b.ExclusiveStartKey[tableSortKey]; ok {
+				attrVal, err := core.TransformDdbAttributeValue(val)
+				if err != nil {
+					return nil, err
+				}
+
 				bs = append(bs, []byte("|")...)
-				bs = append(bs, core.TransformDdbAttributeValue(val).Bytes()...)
+				bs = append(bs, attrVal.Bytes()...)
 			} else {
 				return nil, fmt.Errorf("sort key %s not found in ExclusiveStartKey", tableSortKey)
 			}
