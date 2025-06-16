@@ -11,9 +11,30 @@ import (
 	"strings"
 )
 
+type ScalarAttributeType uint8
+
+const (
+	ScalarAttributeTypeB ScalarAttributeType = iota
+	ScalarAttributeTypeN
+	ScalarAttributeTypeS
+)
+
+func GetScalarAttributeType(def types.AttributeDefinition) (ScalarAttributeType, error) {
+	switch def.AttributeType {
+	case types.ScalarAttributeTypeB:
+		return ScalarAttributeTypeB, nil
+	case types.ScalarAttributeTypeN:
+		return ScalarAttributeTypeN, nil
+	case types.ScalarAttributeTypeS:
+		return ScalarAttributeTypeS, nil
+	default:
+		return 0, fmt.Errorf("unknown attribute type: %s", def.AttributeType)
+	}
+}
+
 type AttributeValue struct {
 	B    *[]byte `json:",omitempty"`
-	Bool *bool   `json:",omitempty"`
+	BOOL *bool   `json:",omitempty"`
 	// BS
 	L    *[]AttributeValue          `json:",omitempty"`
 	M    *map[string]AttributeValue `json:",omitempty"`
@@ -27,7 +48,7 @@ type AttributeValue struct {
 func (a AttributeValue) Type() string {
 	if a.B != nil {
 		return "B"
-	} else if a.Bool != nil {
+	} else if a.BOOL != nil {
 		return "BOOL"
 	} else if a.L != nil {
 		return "L"
@@ -48,11 +69,24 @@ func (a AttributeValue) Type() string {
 	panic("unreachable")
 }
 
+func (a AttributeValue) IsScalarAttributeType(attributeType ScalarAttributeType) bool {
+	switch attributeType {
+	case ScalarAttributeTypeB:
+		return a.Type() == "B"
+	case ScalarAttributeTypeN:
+		return a.Type() == "N"
+	case ScalarAttributeTypeS:
+		return a.Type() == "S"
+	default:
+		return false
+	}
+}
+
 func (a AttributeValue) Bytes() []byte {
 	if a.B != nil {
 		return *a.B
-	} else if a.Bool != nil {
-		if *a.Bool {
+	} else if a.BOOL != nil {
+		if *a.BOOL {
 			return []byte{1}
 		} else {
 			return []byte{0}
@@ -79,8 +113,8 @@ func (a AttributeValue) Bytes() []byte {
 func (a AttributeValue) String() string {
 	if a.B != nil {
 		return fmt.Sprintf("B=%s", *a.B)
-	} else if a.Bool != nil {
-		return fmt.Sprintf("Bool=%t", *a.Bool)
+	} else if a.BOOL != nil {
+		return fmt.Sprintf("BOOL=%t", *a.BOOL)
 	} else if a.L != nil {
 		var b strings.Builder
 		b.WriteString("L=[")
@@ -143,14 +177,14 @@ func (a AttributeValue) Compare(other AttributeValue) (int, error) {
 		}
 
 		return bytes.Compare(*a.B, *other.B), nil
-	} else if a.Bool != nil {
-		if other.Bool == nil {
+	} else if a.BOOL != nil {
+		if other.BOOL == nil {
 			return -1, errors.New("B is nil")
 		}
 
-		if *a.Bool == *other.Bool {
+		if *a.BOOL == *other.BOOL {
 			return 0, nil
-		} else if *a.Bool {
+		} else if *a.BOOL {
 			return 1, nil
 		} else {
 			return -1, nil
@@ -208,12 +242,12 @@ func (a AttributeValue) Equal(other AttributeValue) bool {
 		}
 
 		return bytes.Compare(*a.B, *other.B) == 0
-	} else if a.Bool != nil {
-		if other.Bool == nil {
+	} else if a.BOOL != nil {
+		if other.BOOL == nil {
 			return false
 		}
 
-		return *a.Bool == *other.Bool
+		return *a.BOOL == *other.BOOL
 	} else if a.L != nil {
 		if other.L == nil {
 			return false
@@ -296,9 +330,9 @@ func (a AttributeValue) Clone() AttributeValue {
 		b := make([]byte, len(*a.B))
 		copy(b, *a.B)
 		clonedVal.B = &b
-	} else if a.Bool != nil {
-		b := *a.Bool
-		clonedVal.Bool = &b
+	} else if a.BOOL != nil {
+		b := *a.BOOL
+		clonedVal.BOOL = &b
 	} else if a.L != nil {
 		l := make([]AttributeValue, len(*a.L))
 		for i, v := range *a.L {
@@ -337,8 +371,8 @@ func (a AttributeValue) Clone() AttributeValue {
 func (a AttributeValue) ToDdbAttributeValue() types.AttributeValue {
 	if a.B != nil {
 		return &types.AttributeValueMemberB{Value: *a.B}
-	} else if a.Bool != nil {
-		return &types.AttributeValueMemberBOOL{Value: *a.Bool}
+	} else if a.BOOL != nil {
+		return &types.AttributeValueMemberBOOL{Value: *a.BOOL}
 	} else if a.L != nil {
 		vals := make([]types.AttributeValue, len(*a.L))
 		for i, v := range *a.L {
@@ -379,74 +413,114 @@ func DecodingAttributeValues(bs []byte) (map[string]AttributeValue, error) {
 	return m, err
 }
 
-func TransformDdbAttributeValue(val types.AttributeValue) AttributeValue {
+type InvalidNumber struct {
+	RawError error
+}
+
+func (e InvalidNumber) Error() string {
+	return e.RawError.Error()
+}
+
+func TransformDdbAttributeValue(val types.AttributeValue) (AttributeValue, error) {
 	switch val.(type) {
 	case *types.AttributeValueMemberB:
 		b := val.(*types.AttributeValueMemberB)
 		return AttributeValue{
 			B: &b.Value,
-		}
+		}, nil
 	case *types.AttributeValueMemberBOOL:
 		b := val.(*types.AttributeValueMemberBOOL)
 		return AttributeValue{
-			Bool: &b.Value,
-		}
+			BOOL: &b.Value,
+		}, nil
 	case *types.AttributeValueMemberL:
 		l := val.(*types.AttributeValueMemberL)
 		list := make([]AttributeValue, len(l.Value))
 		for i, v := range l.Value {
-			list[i] = TransformDdbAttributeValue(v)
+			element, err := TransformDdbAttributeValue(v)
+			if err != nil {
+				return AttributeValue{}, err
+			}
+
+			list[i] = element
 		}
 		return AttributeValue{
 			L: &list,
-		}
+		}, nil
 	case *types.AttributeValueMemberM:
 		m := val.(*types.AttributeValueMemberM)
 		m2 := make(map[string]AttributeValue)
 		for k, v := range m.Value {
-			m2[k] = TransformDdbAttributeValue(v)
+			entry, err := TransformDdbAttributeValue(v)
+			if err != nil {
+				return AttributeValue{}, err
+			}
+			m2[k] = entry
 		}
 		return AttributeValue{
 			M: &m2,
-		}
+		}, nil
 	case *types.AttributeValueMemberN:
 		n := val.(*types.AttributeValueMemberN)
+
+		_, err := strconv.ParseFloat(n.Value, 64)
+		if err != nil {
+			return AttributeValue{}, InvalidNumber{err}
+		}
 		return AttributeValue{
 			N: &n.Value,
-		}
+		}, nil
 	case *types.AttributeValueMemberNS:
 		ns := val.(*types.AttributeValueMemberNS)
 		return AttributeValue{
 			NS: &ns.Value,
-		}
+		}, nil
 	case *types.AttributeValueMemberNULL:
 		n := val.(*types.AttributeValueMemberNULL)
 		return AttributeValue{
 			NULL: &n.Value,
-		}
+		}, nil
 	case *types.AttributeValueMemberS:
 		s := val.(*types.AttributeValueMemberS)
 		return AttributeValue{
 			S: &s.Value,
-		}
+		}, nil
 	case *types.AttributeValueMemberSS:
 		ss := val.(*types.AttributeValueMemberSS)
 		return AttributeValue{
 			SS: &ss.Value,
-		}
+		}, nil
 	default:
 		panic("unknown attribute type")
 	}
 }
 
-func NewEntryFromItem(m map[string]types.AttributeValue) *Entry {
-	body := make(map[string]AttributeValue)
-	for key, val := range m {
-		body[key] = TransformDdbAttributeValue(val)
+func NewEntryFromItem(m map[string]types.AttributeValue) (*Entry, error) {
+	m2, err := TransformAttributeValueMap(m)
+	if err != nil {
+		return nil, err
 	}
+
 	return &Entry{
-		Body: body,
+		Body: m2,
+	}, nil
+}
+
+func TransformAttributeValueMap(m map[string]types.AttributeValue) (map[string]AttributeValue, error) {
+	res := make(map[string]AttributeValue)
+	for key, val := range m {
+		val2, err := TransformDdbAttributeValue(val)
+		if err != nil {
+
+			var invalidNumber InvalidNumber
+			if errors.As(err, &invalidNumber) {
+				return nil, fmt.Errorf("A value provided cannot be converted into a number for key %s", key)
+			}
+			return nil, err
+		}
+		res[key] = val2
 	}
+	return res, nil
 }
 
 func NewItemFromEntry(m map[string]AttributeValue) map[string]types.AttributeValue {

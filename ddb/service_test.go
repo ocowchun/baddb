@@ -16,22 +16,25 @@ func TestEncoding(t *testing.T) {
 	ramens["shoyu"] = &types.AttributeValueMemberS{Value: "Shigure"}
 	m["ramens"] = &types.AttributeValueMemberM{Value: ramens}
 
-	entry := core.NewEntryFromItem(m)
+	attrs, err := core.TransformAttributeValueMap(m)
+	if err != nil {
+		t.Fatalf("error transforming attributes: %v", err)
+	}
 
-	if *entry.Body["hashKey"].S != "hashKey1" {
-		t.Fatalf("hashKey is not equal, expected :%s, got %s", "hashKey1", *entry.Body["hashKey"].S)
+	if *attrs["hashKey"].S != "hashKey1" {
+		t.Fatalf("hashKey is not equal, expected :%s, got %s", "hashKey1", *attrs["hashKey"].S)
 	}
-	if *entry.Body["rangeKey"].S != "rangeKey1" {
-		t.Fatalf("rangeKey is not equal, expected :%s, got %s", "rangeKey1", *entry.Body["rangeKey"].S)
+	if *attrs["rangeKey"].S != "rangeKey1" {
+		t.Fatalf("rangeKey is not equal, expected :%s, got %s", "rangeKey1", *attrs["rangeKey"].S)
 	}
-	if *entry.Body["count"].N != "9527" {
-		t.Fatalf("count is not equal, expected :%s, got %s", "9527", *entry.Body["count"].N)
+	if *attrs["count"].N != "9527" {
+		t.Fatalf("count is not equal, expected :%s, got %s", "9527", *attrs["count"].N)
 	}
-	if entry.Body["ramens"].M == nil || *(*entry.Body["ramens"].M)["shio"].S != "Honmaru Tei" || *(*entry.Body["ramens"].M)["shoyu"].S != "Shigure" {
+	if attrs["ramens"].M == nil || *(*attrs["ramens"].M)["shio"].S != "Honmaru Tei" || *(*attrs["ramens"].M)["shoyu"].S != "Shigure" {
 		t.Fatalf("ramens is not equal!")
 	}
 
-	_, err := core.EncodingAttributeValue(entry.Body)
+	_, err = core.EncodingAttributeValue(attrs)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -132,8 +132,8 @@ func (s *InnerStorage) CreateTable(meta *core.TableMetaData) error {
 		readLimiter := rate.NewLimiter(rate.Limit(readCapacity), readCapacity)
 		globalSecondarySettings[*gsi.IndexName] = InnerTableGlobalSecondaryIndexSetting{
 			IndexTableName:   gsiTableName,
-			PartitionKeyName: gsi.PartitionKeyName,
-			SortKeyName:      gsi.SortKeyName,
+			PartitionKeyName: gsi.PartitionKeyName(),
+			SortKeyName:      gsi.SortKeyName(),
 			NonKeyAttributes: gsi.NonKeyAttributes,
 			ProjectionType:   gsi.ProjectionType,
 			readRateLimiter:  readLimiter,

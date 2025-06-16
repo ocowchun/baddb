@@ -7,6 +7,7 @@ import (
 
 type KeySchema struct {
 	AttributeName string
+	AttributeType ScalarAttributeType
 }
 
 type TableMetaData struct {
@@ -20,6 +21,33 @@ type TableMetaData struct {
 	PartitionKeySchema           *KeySchema
 	SortKeySchema                *KeySchema
 	BillingMode                  BillingMode
+}
+
+func (m *TableMetaData) FindKeySchema(attributeName string) *KeySchema {
+	if m.PartitionKeySchema != nil && m.PartitionKeySchema.AttributeName == attributeName {
+		return m.PartitionKeySchema
+	}
+
+	if m.SortKeySchema != nil && m.SortKeySchema.AttributeName == attributeName {
+		return m.SortKeySchema
+	}
+
+	for _, index := range m.GlobalSecondaryIndexSettings {
+		if index.PartitionKeySchema != nil && index.PartitionKeySchema.AttributeName == attributeName {
+			return &KeySchema{
+				AttributeName: index.PartitionKeySchema.AttributeName,
+				AttributeType: index.PartitionKeySchema.AttributeType,
+			}
+		}
+		if index.SortKeySchema != nil && index.SortKeySchema.AttributeName == attributeName {
+			return &KeySchema{
+				AttributeName: index.SortKeySchema.AttributeName,
+				AttributeType: index.SortKeySchema.AttributeType,
+			}
+		}
+	}
+	return nil
+
 }
 
 func (m *TableMetaData) Description(itemCount int64) *types.TableDescription {
@@ -41,14 +69,14 @@ func (m *TableMetaData) Description(itemCount int64) *types.TableDescription {
 	gsi := make([]types.GlobalSecondaryIndexDescription, 0)
 	// TODO: implement GlobalSecondaryIndexDescription
 	for _, setting := range m.GlobalSecondaryIndexSettings {
-		keySchema := make([]types.KeySchemaElement, 0)
-		keySchema = append(keySchema, types.KeySchemaElement{
-			AttributeName: setting.PartitionKeyName,
+		gsiKeySchema := make([]types.KeySchemaElement, 0)
+		gsiKeySchema = append(gsiKeySchema, types.KeySchemaElement{
+			AttributeName: &setting.PartitionKeySchema.AttributeName,
 			KeyType:       types.KeyTypeHash,
 		})
-		if setting.SortKeyName != nil {
-			keySchema = append(keySchema, types.KeySchemaElement{
-				AttributeName: setting.SortKeyName,
+		if setting.SortKeySchema != nil {
+			gsiKeySchema = append(gsiKeySchema, types.KeySchemaElement{
+				AttributeName: &setting.SortKeySchema.AttributeName,
 				KeyType:       types.KeyTypeRange,
 			})
 		}
@@ -70,7 +98,7 @@ func (m *TableMetaData) Description(itemCount int64) *types.TableDescription {
 
 		gsi = append(gsi, types.GlobalSecondaryIndexDescription{
 			IndexName: setting.IndexName,
-			KeySchema: keySchema,
+			KeySchema: gsiKeySchema,
 			// TODO: fix it later, GSI item count might be different from the main table, but for now, we just use the same item count
 			ItemCount:      &itemCount,
 			IndexSizeBytes: &tableSizeBytes,

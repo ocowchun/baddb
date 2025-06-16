@@ -169,7 +169,11 @@ func EncodeBatchGetItemOutput(output *dynamodb.BatchGetItemOutput) ([]byte, erro
 	for tableName, items := range output.Responses {
 		items2 := make([]map[string]core.AttributeValue, len(items))
 		for i, item := range items {
-			items2[i] = core.NewEntryFromItem(item).Body
+			m, err := core.TransformAttributeValueMap(item)
+			if err != nil {
+				return nil, err
+			}
+			items2[i] = m
 		}
 		responses[tableName] = items2
 	}
@@ -178,7 +182,11 @@ func EncodeBatchGetItemOutput(output *dynamodb.BatchGetItemOutput) ([]byte, erro
 	for tableName, keysAndAttributes := range output.UnprocessedKeys {
 		keys := make([]map[string]core.AttributeValue, len(keysAndAttributes.Keys))
 		for i, key := range keysAndAttributes.Keys {
-			keys[i] = core.NewEntryFromItem(key).Body
+			m, err := core.TransformAttributeValueMap(key)
+			if err != nil {
+				return nil, err
+			}
+			keys[i] = m
 		}
 		unprocessedKeys[tableName] = KeysAndAttributes{
 			Keys:                     keys,
@@ -268,15 +276,24 @@ func EncodeBatchWriteItemOutput(output *dynamodb.BatchWriteItemOutput) ([]byte, 
 		requests := make([]WriteRequest, len(writeRequests))
 		for i, writeRequest := range writeRequests {
 			if writeRequest.DeleteRequest != nil {
+				key, err := core.TransformAttributeValueMap(writeRequest.DeleteRequest.Key)
+				if err != nil {
+					return nil, err
+				}
+
 				requests[i] = WriteRequest{
 					DeleteRequest: &DeleteRequest{
-						Key: core.NewEntryFromItem(writeRequest.DeleteRequest.Key).Body,
+						Key: key,
 					},
 				}
 			} else {
+				item, err := core.TransformAttributeValueMap(writeRequest.PutRequest.Item)
+				if err != nil {
+					return nil, err
+				}
 				requests[i] = WriteRequest{
 					PutRequest: &PutRequest{
-						Item: core.NewEntryFromItem(writeRequest.PutRequest.Item).Body,
+						Item: item,
 					},
 				}
 			}
@@ -462,9 +479,10 @@ type updateItemOutput struct {
 }
 
 func EncodeUpdateItemOutput(output *dynamodb.UpdateItemOutput) ([]byte, error) {
+	attrs, err := core.TransformAttributeValueMap(output.Attributes)
 	output2 := updateItemOutput{
 		ConsumedCapacity: output.ConsumedCapacity,
-		Attributes:       core.NewEntryFromItem(output.Attributes).Body,
+		Attributes:       attrs,
 		ResultMetadata:   output.ResultMetadata,
 	}
 
@@ -519,9 +537,10 @@ type getItemOutput struct {
 }
 
 func EncodeGetItemOutput(output *dynamodb.GetItemOutput) ([]byte, error) {
+	item, err := core.TransformAttributeValueMap(output.Item)
 	output2 := getItemOutput{
 		ConsumedCapacity: output.ConsumedCapacity,
-		Item:             core.NewEntryFromItem(output.Item).Body,
+		Item:             item,
 		ResultMetadata:   output.ResultMetadata,
 	}
 	bs, err := json.Marshal(output2)
@@ -584,13 +603,22 @@ type queryOutput struct {
 func EncodeQueryOutput(output *dynamodb.QueryOutput) ([]byte, error) {
 	items := make([]map[string]core.AttributeValue, len(output.Items))
 	for i, item := range output.Items {
-		items[i] = core.NewEntryFromItem(item).Body
+		m, err := core.TransformAttributeValueMap(item)
+		if err != nil {
+			return nil, err
+		}
+		items[i] = m
+	}
+
+	lastKey, err := core.TransformAttributeValueMap(output.LastEvaluatedKey)
+	if err != nil {
+		return nil, err
 	}
 
 	output2 := queryOutput{
 		Count:            output.Count,
 		Items:            items,
-		LastEvaluatedKey: core.NewEntryFromItem(output.LastEvaluatedKey).Body,
+		LastEvaluatedKey: lastKey,
 	}
 	bs, err := json.Marshal(output2)
 	return bs, err
@@ -712,8 +740,13 @@ type deleteItemOutput struct {
 }
 
 func EncodeDeleteItemOutput(output *dynamodb.DeleteItemOutput) ([]byte, error) {
+	attrs, err := core.TransformAttributeValueMap(output.Attributes)
+	if err != nil {
+		return nil, err
+	}
+
 	output2 := deleteItemOutput{
-		Attributes: core.NewEntryFromItem(output.Attributes).Body,
+		Attributes: attrs,
 	}
 
 	bs, err := json.Marshal(output2)
@@ -896,13 +929,21 @@ type scanOutput struct {
 func EncodeScanOutput(output *dynamodb.ScanOutput) ([]byte, error) {
 	items := make([]map[string]core.AttributeValue, len(output.Items))
 	for i, item := range output.Items {
-		items[i] = core.NewEntryFromItem(item).Body
+		m, err := core.TransformAttributeValueMap(item)
+		if err != nil {
+			return nil, err
+		}
+		items[i] = m
 	}
 
+	lastKey, err := core.TransformAttributeValueMap(output.LastEvaluatedKey)
+	if err != nil {
+		return nil, err
+	}
 	output2 := scanOutput{
 		Count:            output.Count,
 		Items:            items,
-		LastEvaluatedKey: core.NewEntryFromItem(output.LastEvaluatedKey).Body,
+		LastEvaluatedKey: lastKey,
 	}
 	bs, err := json.Marshal(output2)
 	return bs, err

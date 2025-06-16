@@ -29,10 +29,16 @@ func (b *UpdateRequestBuilder) Build() (*inner_storage.UpdateRequest, error) {
 		return nil, fmt.Errorf(msg)
 	}
 
+	exprVals, err := core.NewEntryFromItem(b.ExpressionAttributeValues)
+	if err != nil {
+		return nil, err
+	}
+
 	updateOperation, err := update.BuildUpdateOperation(
 		*b.UpdateExpression,
 		b.ExpressionAttributeNames,
-		core.NewEntryFromItem(b.ExpressionAttributeValues).Body)
+		exprVals.Body,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +48,7 @@ func (b *UpdateRequestBuilder) Build() (*inner_storage.UpdateRequest, error) {
 		cond, err = condition.BuildCondition(
 			*b.ConditionExpression,
 			b.ExpressionAttributeNames,
-			core.NewEntryFromItem(b.ExpressionAttributeValues).Body,
+			exprVals.Body,
 		)
 		if err != nil {
 			return nil, &core.InvalidConditionExpressionError{
@@ -51,8 +57,13 @@ func (b *UpdateRequestBuilder) Build() (*inner_storage.UpdateRequest, error) {
 		}
 	}
 
+	key, err := core.NewEntryFromItem(b.Key)
+	if err != nil {
+		return nil, err
+	}
+
 	req := &inner_storage.UpdateRequest{
-		Key:             core.NewEntryFromItem(b.Key),
+		Key:             key,
 		UpdateOperation: updateOperation,
 		TableName:       tableName,
 		Condition:       cond,

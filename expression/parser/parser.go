@@ -37,7 +37,7 @@ func (e *InvalidKeyConditionExpressionError) Error() string {
 }
 
 func (p *Parser) ParseKeyConditionExpression() (*ast.KeyConditionExpression, error) {
-	predicate1, err := p.parsePredicateExpression()
+	predicate1, err := p.parseKeyPredicateExpression()
 	if err != nil {
 		return nil, &InvalidKeyConditionExpressionError{rawErr: err}
 	}
@@ -47,7 +47,7 @@ func (p *Parser) ParseKeyConditionExpression() (*ast.KeyConditionExpression, err
 	if p.peekTokenIs(token.AND) {
 		p.nextToken()
 		p.nextToken()
-		predicate2, err := p.parsePredicateExpression()
+		predicate2, err := p.parseKeyPredicateExpression()
 		if err != nil {
 			return nil, &InvalidKeyConditionExpressionError{rawErr: err}
 		}
@@ -57,7 +57,15 @@ func (p *Parser) ParseKeyConditionExpression() (*ast.KeyConditionExpression, err
 	return keyCondExpression, nil
 }
 
-func (p *Parser) parsePredicateExpression() (ast.PredicateExpression, error) {
+var KeyConditionComparatorMap = map[string]bool{
+	"=":  true,
+	"<":  true,
+	"<=": true,
+	">":  true,
+	">=": true,
+}
+
+func (p *Parser) parseKeyPredicateExpression() (ast.PredicateExpression, error) {
 	if p.curTokenIs(token.IDENT) || p.curTokenIs(token.SHARP) {
 		attributeName, err := p.parseAttributeName()
 		if err != nil {
@@ -97,9 +105,12 @@ func (p *Parser) parsePredicateExpression() (ast.PredicateExpression, error) {
 			return betweenPredicateExpression, nil
 		} else {
 
-			op, err := p.parseOperator()
+			op, err := p.parseComparator()
 			if err != nil {
 				return nil, err
+			}
+			if _, ok := KeyConditionComparatorMap[op]; !ok {
+				return nil, fmt.Errorf("Invalid operator used in KeyConditionExpression: %s", op)
 			}
 			p.nextToken()
 
@@ -174,27 +185,31 @@ func (p *Parser) parseAttributeName() (ast.AttributeName, error) {
 	}
 }
 
-func (p *Parser) parseOperator() (string, error) {
-	op := ""
+func (p *Parser) parseComparator() (string, error) {
+	switch p.curToken.Type {
+	case token.EQ:
+		return "=", nil
 
-	if p.curTokenIs(token.LT) {
-		op += "<"
-
-	} else if p.curTokenIs(token.GT) {
-		op += ">"
-	}
-
-	if p.curTokenIs(token.EQ) {
-		op += "="
-
-	} else if op != "" && p.peekTokenIs(token.EQ) {
-		p.nextToken()
-		op += "="
-	} else if op == "" {
+	case token.LT:
+		op := "<"
+		if p.peekTokenIs(token.EQ) {
+			p.nextToken()
+			op += "="
+		} else if p.peekTokenIs(token.GT) {
+			p.nextToken()
+			op += ">"
+		}
+		return op, nil
+	case token.GT:
+		op := ">"
+		if p.peekTokenIs(token.EQ) {
+			p.nextToken()
+			op += "="
+		}
+		return op, nil
+	default:
 		return "", fmt.Errorf("unexpected token %v", p.curToken)
 	}
-
-	return op, nil
 }
 
 func (p *Parser) nextToken() {
@@ -353,7 +368,7 @@ func (p *Parser) ParseConditionExpression() (ast.ConditionExpression, error) {
 
 // https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Scan.html#Scan.FilterExpression
 // The syntax for a filter expression is identical to that of a condition expression.
-func (p *Parser) ParseScanExpression() (ast.ConditionExpression, error) {
+func (p *Parser) ParseFilterExpression() (ast.ConditionExpression, error) {
 	return p.parseConditionExpression(PRECEDENCE_LOWEST)
 }
 
@@ -451,7 +466,7 @@ func (p *Parser) parseConditionExpression(precedence uint8) (ast.ConditionExpres
 		} else {
 			//   operand comparator operand
 			p.nextToken()
-			op, err := p.parseOperator()
+			op, err := p.parseComparator()
 			if err != nil {
 				return nil, err
 			}

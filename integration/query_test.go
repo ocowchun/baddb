@@ -41,9 +41,100 @@ func TestQueryByPartitionKey(t *testing.T) {
 	baddbOut, baddbErr := queryAllPages(baddb, input)
 
 	if ddbErr != nil || baddbErr != nil {
-		t.Errorf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
+		t.Fatalf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
 	}
 	compareItems(ddbOut, baddbOut, t)
+	shutdown()
+}
+
+func TestQueryByPartitionKeyWithInvalidInput(t *testing.T) {
+	ddbLocal := newDdbLocalClient()
+	baddb := newBaddbClient()
+	cleanDdbLocal(ddbLocal)
+	shutdown := startServer()
+
+	_, ddbErr := createTable(ddbLocal)
+	_, baddbErr := createTable(baddb)
+	if ddbErr != nil || baddbErr != nil {
+		t.Fatalf("failed to create table: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
+	}
+
+	for _, item := range queryTestItems() {
+		_, _ = putItemRaw(ddbLocal, item)
+		_, _ = putItemRaw(baddb, item)
+	}
+
+	tests := []struct {
+		name           string
+		keyCond        string
+		exprAttrNames  map[string]string
+		exprAttrValues map[string]types.AttributeValue
+	}{
+		{
+			name:    "invalid partition key type",
+			keyCond: "#year = :year",
+			exprAttrNames: map[string]string{
+				"#year": "year",
+			},
+			exprAttrValues: map[string]types.AttributeValue{
+				":year": &types.AttributeValueMemberS{Value: "1994"}, // Incorrect type, should be N
+			},
+		},
+		{
+			name:    "invalid partition key comparator",
+			keyCond: "#year > :year",
+			exprAttrNames: map[string]string{
+				"#year": "year",
+			},
+			exprAttrValues: map[string]types.AttributeValue{
+				":year": &types.AttributeValueMemberN{Value: "1994"},
+			},
+		},
+		{
+			name:    "missing partition key",
+			keyCond: "#title = :title",
+			exprAttrNames: map[string]string{
+				"#title": "title",
+			},
+			exprAttrValues: map[string]types.AttributeValue{
+				":title": &types.AttributeValueMemberS{Value: "The Shawshank Redemption"}, // No partition key provided
+			},
+		},
+		{
+			name:    "invalid partition key value",
+			keyCond: "#year = :year",
+			exprAttrNames: map[string]string{
+				"#year": "year",
+			},
+			exprAttrValues: map[string]types.AttributeValue{
+				":year": &types.AttributeValueMemberN{Value: "言って"},
+			},
+		},
+	}
+	
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &dynamodb.QueryInput{
+				TableName:                 aws.String("movie"),
+				KeyConditionExpression:    aws.String(tt.keyCond),
+				ExpressionAttributeNames:  tt.exprAttrNames,
+				ExpressionAttributeValues: tt.exprAttrValues,
+			}
+			ddbOut, ddbErr := queryAllPages(ddbLocal, input)
+			baddbOut, baddbErr := queryAllPages(baddb, input)
+
+			if ddbOut != nil || baddbOut != nil {
+				t.Fatalf("expected no items, got ddbOut=%v, baddbOut=%v", ddbOut, baddbOut)
+			}
+			if ddbErr == nil || baddbErr == nil {
+				t.Fatalf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
+			}
+			if !compareWithoutRequestID(ddbErr.Error(), baddbErr.Error()) {
+				t.Fatalf("Query errors differ: ddbErr=%s, baddbErr=%s", ddbErr.Error(), baddbErr.Error())
+			}
+		})
+	}
+
 	shutdown()
 }
 
@@ -64,26 +155,142 @@ func TestQueryWithFilter(t *testing.T) {
 		_, _ = putItemRaw(baddb, item)
 	}
 
-	input := &dynamodb.QueryInput{
-		TableName:              aws.String("movie"),
-		KeyConditionExpression: aws.String("#year = :year"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":year": &types.AttributeValueMemberN{Value: "2001"},
-			":lang": &types.AttributeValueMemberS{Value: "Japanese"},
+	tests := []struct {
+		name             string
+		filterExpression string
+		exprAttrNames    map[string]string
+		exprAttrValues   map[string]types.AttributeValue
+	}{
+		{
+			name:             "filter by language",
+			filterExpression: "#lang = :lang",
+			exprAttrNames: map[string]string{
+				"#year": "year",
+				"#lang": "language",
+			},
+			exprAttrValues: map[string]types.AttributeValue{
+				":year": &types.AttributeValueMemberN{Value: "2001"},
+				":lang": &types.AttributeValueMemberS{Value: "Japanese"},
+			},
 		},
-		FilterExpression: aws.String("#lang = :lang"),
-		ExpressionAttributeNames: map[string]string{
-			"#year": "year",
-			"#lang": "language",
-		},
-	}
-	ddbOut, ddbErr := queryAllPages(ddbLocal, input)
-	baddbOut, baddbErr := queryAllPages(baddb, input)
 
-	if ddbErr != nil || baddbErr != nil {
-		t.Errorf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
+		{
+			name:             "filter by rating = 8.6",
+			filterExpression: "#info.#rating = :rating",
+			exprAttrNames: map[string]string{
+				"#year":   "year",
+				"#info":   "info",
+				"#rating": "rating",
+			},
+			exprAttrValues: map[string]types.AttributeValue{
+				":year":   &types.AttributeValueMemberN{Value: "2001"},
+				":rating": &types.AttributeValueMemberN{Value: "8.6"},
+			},
+		},
+
+		{
+			name:             "filter by rating <> 8.6",
+			filterExpression: "#info.#rating <> :rating",
+			exprAttrNames: map[string]string{
+				"#year":   "year",
+				"#info":   "info",
+				"#rating": "rating",
+			},
+			exprAttrValues: map[string]types.AttributeValue{
+				":year":   &types.AttributeValueMemberN{Value: "2001"},
+				":rating": &types.AttributeValueMemberN{Value: "8.6"},
+			},
+		},
+
+		{
+			name:             "filter by rating > 8.6",
+			filterExpression: "#info.#rating > :rating",
+			exprAttrNames: map[string]string{
+				"#year":   "year",
+				"#info":   "info",
+				"#rating": "rating",
+			},
+			exprAttrValues: map[string]types.AttributeValue{
+				":year":   &types.AttributeValueMemberN{Value: "2001"},
+				":rating": &types.AttributeValueMemberN{Value: "8.6"},
+			},
+		},
+
+		{
+			name:             "filter by rating >= 8.6",
+			filterExpression: "#info.#rating > :rating",
+			exprAttrNames: map[string]string{
+				"#year":   "year",
+				"#info":   "info",
+				"#rating": "rating",
+			},
+			exprAttrValues: map[string]types.AttributeValue{
+				":year":   &types.AttributeValueMemberN{Value: "2001"},
+				":rating": &types.AttributeValueMemberN{Value: "8.6"},
+			},
+		},
+
+		{
+			name:             "filter by rating < 8.6",
+			filterExpression: "#info.#rating > :rating",
+			exprAttrNames: map[string]string{
+				"#year":   "year",
+				"#info":   "info",
+				"#rating": "rating",
+			},
+			exprAttrValues: map[string]types.AttributeValue{
+				":year":   &types.AttributeValueMemberN{Value: "2001"},
+				":rating": &types.AttributeValueMemberN{Value: "8.6"},
+			},
+		},
+
+		{
+			name:             "filter by rating <= 8.6",
+			filterExpression: "#info.#rating > :rating",
+			exprAttrNames: map[string]string{
+				"#year":   "year",
+				"#info":   "info",
+				"#rating": "rating",
+			},
+			exprAttrValues: map[string]types.AttributeValue{
+				":year":   &types.AttributeValueMemberN{Value: "2001"},
+				":rating": &types.AttributeValueMemberN{Value: "8.6"},
+			},
+		},
+
+		{
+			name:             "filter by language",
+			filterExpression: "begins_with(#lang, :lang)",
+			exprAttrNames: map[string]string{
+				"#year": "year",
+				"#lang": "language",
+			},
+			exprAttrValues: map[string]types.AttributeValue{
+				":year": &types.AttributeValueMemberN{Value: "2001"},
+				":lang": &types.AttributeValueMemberS{Value: "Eng"},
+			},
+		},
 	}
-	compareItems(ddbOut, baddbOut, t)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &dynamodb.QueryInput{
+				TableName:                 aws.String("movie"),
+				KeyConditionExpression:    aws.String("#year = :year"),
+				FilterExpression:          aws.String(tt.filterExpression),
+				ExpressionAttributeNames:  tt.exprAttrNames,
+				ExpressionAttributeValues: tt.exprAttrValues,
+			}
+			ddbOut, ddbErr := queryAllPages(ddbLocal, input)
+			baddbOut, baddbErr := queryAllPages(baddb, input)
+
+			if ddbErr != nil || baddbErr != nil {
+				t.Fatalf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
+			}
+			compareItems(ddbOut, baddbOut, t)
+		})
+	}
+
 	shutdown()
 }
 
@@ -111,14 +318,18 @@ func TestQueryWithReservedWord(t *testing.T) {
 			":year": &types.AttributeValueMemberN{Value: "1994"},
 		},
 	}
-	_, ddbErr = queryAllPages(ddbLocal, input)
-	_, baddbErr = queryAllPages(baddb, input)
+	ddbOut, ddbErr := queryAllPages(ddbLocal, input)
+	baddbOut, baddbErr := queryAllPages(baddb, input)
+
+	if ddbOut != nil || baddbOut != nil {
+		t.Fatalf("expected no items, got ddbOut=%v, baddbOut=%v", ddbOut, baddbOut)
+	}
 
 	if ddbErr == nil || baddbErr == nil {
-		t.Errorf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
+		t.Fatalf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
 	}
 	if !compareWithoutRequestID(ddbErr.Error(), baddbErr.Error()) {
-		t.Errorf("Query errors differ: ddbErr=%s, baddbErr=%s", ddbErr.Error(), baddbErr.Error())
+		t.Fatalf("Query errors differ: ddbErr=%s, baddbErr=%s", ddbErr.Error(), baddbErr.Error())
 	}
 
 	shutdown()
@@ -156,7 +367,7 @@ func TestQueryGSI(t *testing.T) {
 	baddbOut, baddbErr := queryAllPages(baddb, input)
 
 	if ddbErr != nil || baddbErr != nil {
-		t.Errorf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
+		t.Fatalf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
 	}
 	compareItems(ddbOut, baddbOut, t)
 	shutdown()
@@ -227,7 +438,7 @@ func TestQueryPartitionKeyAndSortKey(t *testing.T) {
 			baddbOut, baddbErr := queryAllPages(baddb, input)
 
 			if ddbErr != nil || baddbErr != nil {
-				t.Errorf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
+				t.Fatalf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
 			}
 			compareItems(ddbOut, baddbOut, t)
 		})
