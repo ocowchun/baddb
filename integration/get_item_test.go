@@ -36,16 +36,9 @@ func TestGetItemBehavior(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		ddbLocal := newDdbLocalClient()
-		baddb := newBaddbClient()
-		cleanDdbLocal(ddbLocal)
-		shutdown := startServer()
-
-		_, ddbErr := createTable(ddbLocal)
-		_, baddbErr := createTable(baddb)
-		if ddbErr != nil || baddbErr != nil {
-			t.Fatalf("failed to create table: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
-		}
+		testContext := setupTest(t)
+		ddbLocal := testContext.ddbLocal
+		baddb := testContext.baddb
 
 		if tt.insertItem {
 			_, err := putItemWithCondition(ddbLocal, nil)
@@ -59,6 +52,7 @@ func TestGetItemBehavior(t *testing.T) {
 		}
 
 		t.Run(tt.name, func(t *testing.T) {
+			defer testContext.shutdown()
 			ddbOut, ddbErr := getItem(ddbLocal, tt.key)
 			baddbOut, baddbErr := getItem(baddb, tt.key)
 
@@ -69,17 +63,19 @@ func TestGetItemBehavior(t *testing.T) {
 			if tt.expectFound {
 				compareGetItemOutput(ddbOut, baddbOut, t)
 			} else {
+				if ddbOut.Item != nil || baddbOut.Item != nil {
+					t.Errorf("expected item to be nil, got ddbLocal=%v, baddb=%v", ddbOut.Item == nil, baddbOut.Item == nil)
+				}
+
 				if len(ddbOut.Item) != 0 || len(baddbOut.Item) != 0 {
 					t.Errorf("expected no item, got ddbLocal=%v, baddb=%v", ddbOut.Item, baddbOut.Item)
 				}
 			}
 		})
-
-		shutdown()
 	}
 }
 
-func TestGetItemTableNotExists(t *testing.T) {
+func TestGetItem_TableNotExists(t *testing.T) {
 	ddbLocal := newDdbLocalClient()
 	baddb := newBaddbClient()
 	cleanDdbLocal(ddbLocal)
@@ -107,6 +103,54 @@ func TestGetItemTableNotExists(t *testing.T) {
 	}
 
 	shutdown()
+}
+
+func TestGetItem_InvalidKey(t *testing.T) {
+	tests := []struct {
+		name string
+		key  map[string]types.AttributeValue
+	}{
+		{
+			name: "invalid key name",
+			key: map[string]types.AttributeValue{
+				"wrong-year": &types.AttributeValueMemberN{Value: "2000"},
+				"title":      &types.AttributeValueMemberS{Value: "Gladiator"},
+			},
+		},
+		{
+			name: "invalid key type",
+			key: map[string]types.AttributeValue{
+				"year":  &types.AttributeValueMemberS{Value: "2000"},
+				"title": &types.AttributeValueMemberS{Value: "Gladiator"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testContext := setupTest(t)
+			ddbLocal := testContext.ddbLocal
+			baddb := testContext.baddb
+			defer testContext.shutdown()
+
+			ddbOut, ddbErr := getItem(ddbLocal, tt.key)
+			baddbOut, baddbErr := getItem(baddb, tt.key)
+
+			if ddbErr == nil || baddbErr == nil {
+				t.Errorf("expected error for missing table, got ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
+			}
+			if ddbErr != nil && baddbErr != nil && !compareWithoutRequestID(ddbErr.Error(), baddbErr.Error()) {
+				t.Errorf("expected errors to match, ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
+			}
+			if ddbOut != nil && len(ddbOut.Item) != 0 {
+				t.Errorf("expected no item from ddbLocal, got %v", ddbOut.Item)
+			}
+			if baddbOut != nil && len(baddbOut.Item) != 0 {
+				t.Errorf("expected no item from baddb, got %v", baddbOut.Item)
+			}
+		})
+	}
+
+	//  GetItem, https response error StatusCode: 400, RequestID: 5f750dc4-6e63-4d58-b062-9b761933aece, api error ValidationException: One of the required keys was not given a value, baddbErr=<nil>
 }
 
 func getItem(client *dynamodb.Client, key map[string]types.AttributeValue) (*dynamodb.GetItemOutput, error) {

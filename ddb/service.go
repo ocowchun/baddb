@@ -491,21 +491,15 @@ func (svc *Service) GetItem(ctx context.Context, input *dynamodb.GetItemInput) (
 
 	tableName := *input.TableName
 	if _, ok := svc.tableMetadataStore[tableName]; ok {
-
-		consistentRead := false
-		if input.ConsistentRead != nil {
-			consistentRead = *input.ConsistentRead
+		builder := request.GetRequestBuilder{
+			Input:         input,
+			TableMetaData: svc.tableMetadataStore[tableName],
 		}
-
-		key, err := core.NewEntryFromItem(input.Key)
+		req, err := builder.Build()
 		if err != nil {
-			return nil, err
-		}
-
-		req := &inner_storage.GetRequest{
-			Entry:          key,
-			ConsistentRead: consistentRead,
-			TableName:      tableName,
+			return nil, &ValidationException{
+				Message: err.Error(),
+			}
 		}
 
 		entry, err := svc.storage.Get(req)
@@ -515,7 +509,7 @@ func (svc *Service) GetItem(ctx context.Context, input *dynamodb.GetItemInput) (
 		}
 		if entry == nil {
 			output := dynamodb.GetItemOutput{
-				Item: make(map[string]types.AttributeValue),
+				Item: nil,
 			}
 			return &output, nil
 		}

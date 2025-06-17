@@ -507,6 +507,10 @@ func NewEntryFromItem(m map[string]types.AttributeValue) (*Entry, error) {
 }
 
 func TransformAttributeValueMap(m map[string]types.AttributeValue) (map[string]AttributeValue, error) {
+	if m == nil {
+		return nil, nil
+	}
+
 	res := make(map[string]AttributeValue)
 	for key, val := range m {
 		val2, err := TransformDdbAttributeValue(val)

@@ -50,32 +50,6 @@ func TestTransactWriteItemsBehavior(t *testing.T) {
 	}
 }
 
-type TestContext struct {
-	ddbLocal *dynamodb.Client
-	baddb    *dynamodb.Client
-	shutdown func()
-}
-
-func setupTest(t *testing.T) *TestContext {
-	ddbLocal := newDdbLocalClient()
-	baddb := newBaddbClient()
-	cleanDdbLocal(ddbLocal)
-	shutdown := startServer()
-
-	_, ddbErr := createTable(ddbLocal)
-	_, baddbErr := createTable(baddb)
-	if ddbErr != nil || baddbErr != nil {
-		t.Fatalf("failed to create table: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
-	}
-
-	return &TestContext{
-		ddbLocal: ddbLocal,
-		baddb:    baddb,
-		shutdown: shutdown,
-	}
-
-}
-
 func TestTransactWriteItemsWithConditionFailure(t *testing.T) {
 	testContext := setupTest(t)
 	ddbLocal := testContext.ddbLocal
