@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -121,7 +122,7 @@ func TestTransactWriteItems(t *testing.T) {
 	}
 }
 
-func TestTransactWriteItemsWithTooManyRequest(t *testing.T) {
+func TestTransactWriteItems_TooManyRequest(t *testing.T) {
 	shutdown := startServer()
 	defer shutdown()
 	ddb := newDdbClient()
@@ -156,7 +157,7 @@ func TestTransactWriteItemsWithTooManyRequest(t *testing.T) {
 	}
 }
 
-func TestTransactWriteItemsWithDuplicatedKey(t *testing.T) {
+func TestTransactWriteItems_DuplicatedKey(t *testing.T) {
 	shutdown := startServer()
 	defer shutdown()
 	ddb := newDdbClient()
@@ -187,6 +188,43 @@ func TestTransactWriteItemsWithDuplicatedKey(t *testing.T) {
 	} else {
 		if !strings.Contains(err.Error(), "Transaction request cannot include multiple operations on one item") {
 			t.Fatalf("error message is unexpected, got %v", err)
+		}
+	}
+}
+
+func TestTransactWriteItems_ProvisionedThroughputExceeded(t *testing.T) {
+	shutdown := startServer()
+	defer shutdown()
+	ddb := newDdbClient()
+	_, err := createTable(ddb, 1, 1)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	transactItems := make([]types.TransactWriteItem, 0)
+	for len(transactItems) <= 20 {
+		transactItems = append(transactItems, types.TransactWriteItem{
+			Put: &types.Put{
+				Item: map[string]types.AttributeValue{
+					"year":  &types.AttributeValueMemberN{Value: "2025"},
+					"title": &types.AttributeValueMemberS{Value: fmt.Sprintf("Hello World %d", len(transactItems))},
+				},
+				TableName: aws.String("movie"),
+			},
+		})
+	}
+	input := dynamodb.TransactWriteItemsInput{
+		TransactItems: transactItems,
+	}
+
+	_, err = ddb.TransactWriteItems(context.Background(), &input)
+
+	if err == nil {
+		t.Fatalf("Expected ProvisionedThroughputExceededException, but no error occurred")
+	} else {
+		var provisionedThroughputExceededException *types.ProvisionedThroughputExceededException
+		if !errors.As(err, &provisionedThroughputExceededException) {
+			t.Fatalf("Expected ProvisionedThroughputExceededException, got %v", err)
 		}
 	}
 }

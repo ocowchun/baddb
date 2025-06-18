@@ -1,3 +1,6 @@
+## 0.2.5 / 2025-06-18
+* Improve `TransactWriteItems` error response 
+
 ## 0.2.4 / 2025-06-17
 * Fix item not found logic, return nil instead of empty map
 * Improve `GetItem` validation

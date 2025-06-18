@@ -810,7 +810,10 @@ func (s *InnerStorage) Get(req *GetRequest) (*core.Entry, error) {
 	return entry, txn.Commit()
 }
 
-var ErrUnprocessed = errors.New("unprocessed entry")
+var (
+	RateLimitReachedError = errors.New("rate limit reached")
+	ErrUnprocessed        = errors.New("unprocessed entry")
+)
 
 func (s *InnerStorage) GetWithTransaction(req *GetRequest, txn *Txn) (*core.Entry, error) {
 	tableMetadata, ok := s.TableMetaDatas[req.TableName]
@@ -867,10 +870,6 @@ func (s *InnerStorage) readTs(tableName string, isGsi bool) (time.Time, error) {
 		return time.Now().Add(time.Second * time.Duration(m.tableDelaySeconds*-1)), nil
 	}
 }
-
-var (
-	RateLimitReachedError = errors.New("rate limit reached")
-)
 
 func (s *InnerStorage) Query(req *query.Query) (*QueryResponse, error) {
 	txn, err := s.BeginTxn()

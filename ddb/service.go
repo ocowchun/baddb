@@ -931,11 +931,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 			} else if matched {
 				continue
 			} else {
-				msg := "The conditional request failed"
-				err = &types.ConditionalCheckFailedException{
-					Message: &msg,
-				}
-				return nil, err
+				return nil, buildTransactErr(err)
 			}
 
 		} else if writeItem.Put != nil {
@@ -963,15 +959,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 			}
 			err = svc.storage.PutWithTransaction(req, txn)
 			if err != nil {
-				return nil, &TransactionCanceledException{
-					rawError: err,
-					CancellationReasons: []CancellationReason{
-						{
-							Code:    "ConditionalCheckFailed",
-							Message: "The conditional request failed",
-						},
-					},
-				}
+				return nil, buildTransactErr(err)
 			}
 		} else if writeItem.Delete != nil {
 			deleteReq := writeItem.Delete
@@ -1030,7 +1018,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 
 			_, err = svc.storage.UpdateWithTransaction(req, txn)
 			if err != nil {
-				return nil, &TransactionCanceledException{rawError: err}
+				return nil, buildTransactErr(err)
 			}
 		}
 
@@ -1043,6 +1031,25 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 	output := &dynamodb.TransactWriteItemsOutput{}
 
 	return output, nil
+}
+
+func buildTransactErr(err error) error {
+	var conditionalCheckFailedException *inner_storage.ConditionalCheckFailedException
+	if errors.As(err, &conditionalCheckFailedException) {
+		return &TransactionCanceledException{
+			rawError: err,
+			CancellationReasons: []CancellationReason{
+				{
+					Code:    "ConditionalCheckFailed",
+					Message: "The conditional request failed",
+				},
+			},
+		}
+	} else if errors.Is(err, inner_storage.RateLimitReachedError) {
+		return ProvisionedThroughputExceededException
+	} else {
+		return err
+	}
 }
 
 func (svc *Service) Scan(ctx context.Context, input *dynamodb.ScanInput) (*dynamodb.ScanOutput, error) {

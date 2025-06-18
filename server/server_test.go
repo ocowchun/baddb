@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
@@ -966,6 +967,7 @@ func newDdbClient() *dynamodb.Client {
 	// Using the Config value, create the DynamoDB client
 	client := dynamodb.NewFromConfig(cfg, func(options *dynamodb.Options) {
 		options.BaseEndpoint = aws.String("http://localhost:8080")
+		options.Retryer = retry.AddWithMaxAttempts(retry.NewStandard(), 2)
 	})
 
 	return client
