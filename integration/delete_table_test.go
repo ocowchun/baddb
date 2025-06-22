@@ -1,9 +1,6 @@
 package integration
 
 import (
-	"context"
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"testing"
 )
 
@@ -28,8 +25,8 @@ func TestDeleteTable(t *testing.T) {
 	}
 
 	// Delete table
-	ddbDelOut, ddbDelErr := deleteTable(ddbLocal)
-	baddbDelOut, baddbDelErr := deleteTable(baddb)
+	ddbDelOut, ddbDelErr := deleteTable(ddbLocal, TestTableName)
+	baddbDelOut, baddbDelErr := deleteTable(baddb, TestTableName)
 	if ddbDelErr != nil || baddbDelErr != nil {
 		if ddbDelErr != nil {
 			t.Fatalf("failed to delete table from ddb-local, %v", ddbDelErr)
@@ -52,11 +49,11 @@ func TestDeleteTableWhenTableNotExists(t *testing.T) {
 
 	baddb := newBaddbClient()
 
-	deleteTable(ddbLocal)
-	deleteTable(baddb)
+	deleteTable(ddbLocal, TestTableName)
+	deleteTable(baddb, TestTableName)
 	// Delete table
-	ddbDelOut, ddbDelErr := deleteTable(ddbLocal)
-	baddbDelOut, baddbDelErr := deleteTable(baddb)
+	ddbDelOut, ddbDelErr := deleteTable(ddbLocal, TestTableName)
+	baddbDelOut, baddbDelErr := deleteTable(baddb, TestTableName)
 
 	if ddbDelErr == nil || baddbDelErr == nil {
 		t.Errorf("expected error for missing table, got ddbErr=%v, baddbErr=%v", ddbDelErr, baddbDelErr)
@@ -68,13 +65,4 @@ func TestDeleteTableWhenTableNotExists(t *testing.T) {
 	if !compareWithoutRequestID(ddbDelErr.Error(), baddbDelErr.Error()) {
 		t.Errorf("expected errors to match, ddbErr=%v, baddbErr=%v", ddbDelErr, baddbDelErr)
 	}
-}
-
-// deleteTable deletes the "movie" table using the provided DynamoDB client.
-func deleteTable(client *dynamodb.Client) (*dynamodb.DeleteTableOutput, error) {
-	tableName := "movie"
-	input := &dynamodb.DeleteTableInput{
-		TableName: aws.String(tableName),
-	}
-	return client.DeleteTable(context.TODO(), input)
 }

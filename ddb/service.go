@@ -300,6 +300,23 @@ func (svc *Service) BatchWriteItem(ctx context.Context, input *dynamodb.BatchWri
 	svc.tableLock.RLock()
 	defer svc.tableLock.RUnlock()
 
+	//if len(input.RequestItems) == 0 {
+	//	msg := "The batch write request list for a table cannot be null or empty"
+	//	err := &ValidationException{
+	//		Message: msg,
+	//	}
+	//	return nil, err
+	//}
+	for tableName, requests := range input.RequestItems {
+		if len(requests) == 0 {
+			msg := fmt.Sprintf("The batch write request list for a table cannot be null or empty: %s", tableName)
+			err := &ValidationException{
+				Message: msg,
+			}
+			return nil, err
+		}
+	}
+
 	reqCount := 0
 	for _, r := range input.RequestItems {
 		reqCount += len(r)

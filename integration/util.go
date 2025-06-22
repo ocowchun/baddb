@@ -10,17 +10,21 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/ocowchun/baddb/server"
 	"log"
+	"math"
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
 
+const TestTableName = "movie"
+
 func cleanDdbLocal(client *dynamodb.Client) {
 	// Clean up the table
 	_, err := client.DeleteTable(context.TODO(), &dynamodb.DeleteTableInput{
-		TableName: aws.String("movie"),
+		TableName: aws.String(TestTableName),
 	})
 	if err != nil && !strings.Contains(err.Error(), "Cannot do operations on a non-existent table") {
 		log.Fatalf("failed to delete table from ddb-local, %v", err)
@@ -90,8 +94,7 @@ func createTable(client *dynamodb.Client) (*dynamodb.CreateTableOutput, error) {
 				WriteCapacityUnits: aws.Int64(50),
 			},
 		}},
-		TableName: aws.String("movie"),
-		//BillingMode: types.BillingModePayPerRequest,
+		TableName: aws.String(TestTableName),
 
 		BillingMode: types.BillingModeProvisioned,
 		ProvisionedThroughput: &types.ProvisionedThroughput{
@@ -138,24 +141,24 @@ func startServer() func() {
 
 func compareItem(ddbItem map[string]types.AttributeValue, baddbItem map[string]types.AttributeValue, t *testing.T) {
 	if len(ddbItem) != len(baddbItem) {
-		t.Errorf("Item length differ: ddbLocal=%d, baddb=%d", len(ddbItem), len(baddbItem))
+		t.Fatalf("Item length differ: ddbLocal=%d, baddb=%d", len(ddbItem), len(baddbItem))
 		return
 	}
 
 	for k, v := range ddbItem {
 		bv, ok := baddbItem[k]
 		if !ok {
-			t.Errorf("Key %q present in ddbLocal but missing in baddb", k)
+			t.Fatalf("Key %q present in ddbLocal but missing in baddb", k)
 			continue
 		}
 		if !compareAttributeValue(v, bv, t, k) {
-			t.Errorf("Attribute value mismatch for key %q: ddbLocal=%#v, baddb=%#v", k, v, bv)
+			t.Fatalf("Attribute value mismatch for key %q: ddbLocal=%#v, baddb=%#v", k, v, bv)
 		}
 	}
 
 	for k := range baddbItem {
 		if _, ok := ddbItem[k]; !ok {
-			t.Errorf("Key %q present in baddb but missing in ddbLocal", k)
+			t.Fatalf("Key %q present in baddb but missing in ddbLocal", k)
 		}
 	}
 
@@ -169,7 +172,27 @@ func compareAttributeValue(a, b types.AttributeValue, t *testing.T, key string) 
 		return ok && av.Value == bv.Value
 	case *types.AttributeValueMemberN:
 		bv, ok := b.(*types.AttributeValueMemberN)
-		return ok && av.Value == bv.Value
+		if !ok {
+			t.Fatalf("Expected AttributeValueMemberN for key %q, got %T", key, b)
+			return false
+		}
+		numA, err := strconv.ParseFloat(av.Value, 64)
+		if err != nil {
+			t.Fatalf("Failed to parse number for key %q: %s, err: %v", key, av.Value, err)
+		}
+		numB, err := strconv.ParseFloat(bv.Value, 64)
+		if err != nil {
+			t.Fatalf("Failed to parse number for key %q: %s, err: %v", key, bv.Value, err)
+		}
+
+		// Workaround for floating point precision issues, not exact
+		epsilon := 0.0001
+		if math.Abs(numA-numB) < epsilon {
+			// numA and numB are approximately equal
+			return true
+		} else {
+			return false
+		}
 	case *types.AttributeValueMemberBOOL:
 		bv, ok := b.(*types.AttributeValueMemberBOOL)
 		return ok && av.Value == bv.Value
@@ -205,7 +228,7 @@ func compareAttributeValue(a, b types.AttributeValue, t *testing.T, key string) 
 		_, ok := b.(*types.AttributeValueMemberNULL)
 		return ok
 	default:
-		t.Errorf("Unsupported AttributeValue type for key %q", key)
+		t.Fatalf("Unsupported AttributeValue type for key %q", key)
 		return false
 	}
 }
@@ -219,7 +242,7 @@ func compareWithoutRequestID(s1, s2 string) bool {
 
 func compareItems(ddbItems, baddbItems []map[string]types.AttributeValue, t *testing.T) {
 	if len(ddbItems) != len(baddbItems) {
-		t.Errorf("Scan item count differ: ddbLocal=%d, baddb=%d", len(ddbItems), len(baddbItems))
+		t.Fatalf("Scan item count differ: ddbLocal=%d, baddb=%d", len(ddbItems), len(baddbItems))
 		return
 	}
 
@@ -267,4 +290,11 @@ func setupTest(t *testing.T) *TestContext {
 		shutdown: shutdown,
 	}
 
+}
+
+func deleteTable(client *dynamodb.Client, tableName string) (*dynamodb.DeleteTableOutput, error) {
+	input := &dynamodb.DeleteTableInput{
+		TableName: aws.String(tableName),
+	}
+	return client.DeleteTable(context.TODO(), input)
 }
