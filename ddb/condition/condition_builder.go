@@ -3,8 +3,8 @@ package condition
 import (
 	"fmt"
 	"github.com/ocowchun/baddb/ddb/core"
-	"github.com/ocowchun/baddb/expression"
-	"github.com/ocowchun/baddb/expression/ast"
+	"github.com/ocowchun/baddb/ddb/expression"
+	"github.com/ocowchun/baddb/ddb/expression/ast"
 	"strconv"
 	"strings"
 )

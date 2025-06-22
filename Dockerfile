@@ -10,7 +10,6 @@ RUN go mod download
 
 COPY cli/ cli/
 COPY ddb/ ddb/
-COPY expression/ expression/
 COPY server/ server/
 
 RUN go build ./cli/baddb

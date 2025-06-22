@@ -1,9 +1,9 @@
 package expression
 
 import (
-	"github.com/ocowchun/baddb/expression/ast"
-	"github.com/ocowchun/baddb/expression/lexer"
-	"github.com/ocowchun/baddb/expression/parser"
+	"github.com/ocowchun/baddb/ddb/expression/ast"
+	"github.com/ocowchun/baddb/ddb/expression/lexer"
+	"github.com/ocowchun/baddb/ddb/expression/parser"
 	"strings"
 )
 

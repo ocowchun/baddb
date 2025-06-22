@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ocowchun/baddb/ddb/core"
-	"github.com/ocowchun/baddb/expression/ast"
-	"github.com/ocowchun/baddb/expression/lexer"
-	"github.com/ocowchun/baddb/expression/token"
+	"github.com/ocowchun/baddb/ddb/expression/ast"
+	"github.com/ocowchun/baddb/ddb/expression/lexer"
+	"github.com/ocowchun/baddb/ddb/expression/token"
 	"strconv"
 	"strings"
 )

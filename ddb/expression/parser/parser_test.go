@@ -1,7 +1,7 @@
 package parser
 
 import (
-	"github.com/ocowchun/baddb/expression/lexer"
+	"github.com/ocowchun/baddb/ddb/expression/lexer"
 	"strings"
 	"testing"
 )

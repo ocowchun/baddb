@@ -5,7 +5,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/ocowchun/baddb/ddb/condition"
 	"github.com/ocowchun/baddb/ddb/core"
-	"github.com/ocowchun/baddb/expression/ast"
+	"github.com/ocowchun/baddb/ddb/expression/ast"
 	"log"
 )
 

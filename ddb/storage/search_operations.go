@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -13,6 +14,85 @@ import (
 type QueryResponse struct {
 	Entries      []*core.Entry
 	ScannedCount int32
+}
+
+type searchTableInfo struct {
+	tableName   string
+	rateLimiter interface{ AllowN(time.Time, int) bool }
+	isGsi       bool
+}
+
+func (s *InnerStorage) resolveTableForSearch(tableMetadata *InnerTableMetadata, indexName *string) (*searchTableInfo, error) {
+	info := &searchTableInfo{
+		tableName:   tableMetadata.Name,
+		rateLimiter: tableMetadata.readRateLimiter,
+		isGsi:       false,
+	}
+
+	if indexName != nil {
+		gsi, ok := tableMetadata.GlobalSecondaryIndexSettings[*indexName]
+		if !ok {
+			return nil, fmt.Errorf("index %s not found", *indexName)
+		}
+		info.tableName = gsi.IndexTableName
+		info.rateLimiter = gsi.readRateLimiter
+		info.isGsi = true
+	}
+
+	return info, nil
+}
+
+// Common row processing for both Query and Scan
+func (s *InnerStorage) processRowsForSearch(rows *sql.Rows, tableMetadata *InnerTableMetadata, tableInfo *searchTableInfo, readTs time.Time, consistentRead bool, limit int, filterFunc func(*core.Entry) (bool, error)) ([]*core.Entry, int32, error) {
+	var entries []*core.Entry
+	scannedCount := 0
+
+	for rows.Next() {
+		var body []byte
+		if err := rows.Scan(&body); err != nil {
+			return nil, 0, err
+		}
+
+		// Rate limiting check
+		if tableMetadata.billingMode == core.BILLING_MODE_PROVISIONED {
+			n := 1
+			if consistentRead {
+				n = 2
+			}
+			if !tableInfo.rateLimiter.AllowN(time.Now(), n) {
+				return nil, 0, RateLimitReachedError
+			}
+		}
+
+		// Tuple processing
+		var tuple Tuple
+		scannedCount += 1
+		if err := json.Unmarshal(body, &tuple); err != nil {
+			return nil, 0, err
+		}
+
+		entry := tuple.getEntry(consistentRead, readTs, tableInfo.isGsi)
+
+		if entry != nil {
+			// Apply custom filtering logic
+			if filterFunc != nil {
+				shouldInclude, err := filterFunc(entry)
+				if err != nil {
+					return nil, 0, err
+				}
+				if !shouldInclude {
+					continue
+				}
+			}
+			entries = append(entries, entry)
+		}
+
+		if len(entries) >= limit {
+			break
+		}
+	}
+
+	return entries, int32(scannedCount), nil
 }
 
 func (s *InnerStorage) Query(req *query.Query) (*QueryResponse, error) {
@@ -29,21 +109,13 @@ func (s *InnerStorage) Query(req *query.Query) (*QueryResponse, error) {
 
 	res := &QueryResponse{}
 
-	tableName := tableMetadata.Name
-	rateLimiter := tableMetadata.readRateLimiter
-	isGsi := false
-	if req.IndexName != nil {
-		gsi, ok := tableMetadata.GlobalSecondaryIndexSettings[*req.IndexName]
-		if !ok {
-			return nil, fmt.Errorf("index %s not found", *req.IndexName)
-		}
-		tableName = gsi.IndexTableName
-		rateLimiter = gsi.readRateLimiter
-		isGsi = true
+	tableInfo, err := s.resolveTableForSearch(tableMetadata, req.IndexName)
+	if err != nil {
+		return nil, err
 	}
 
 	// Prepare the query statement
-	queryStmt := "SELECT body FROM " + tableName + " WHERE partition_key = ?"
+	queryStmt := "SELECT body FROM " + tableInfo.tableName + " WHERE partition_key = ?"
 	args := []interface{}{req.PartitionKey}
 
 	if req.ExclusiveStartKey != nil {
@@ -64,7 +136,7 @@ func (s *InnerStorage) Query(req *query.Query) (*QueryResponse, error) {
 		queryStmt += ", primary_key DESC "
 	}
 
-	readTs, err := s.readTs(req.TableName, isGsi)
+	readTs, err := s.readTs(req.TableName, tableInfo.isGsi)
 	if err != nil {
 		return nil, err
 	}
@@ -75,61 +147,36 @@ func (s *InnerStorage) Query(req *query.Query) (*QueryResponse, error) {
 	}
 	defer rows.Close()
 
-	var results []*core.Entry
-	scannedCount := 0
-
-	for rows.Next() {
-		var body []byte
-		if err := rows.Scan(&body); err != nil {
-			return nil, err
-		}
-
-		if tableMetadata.billingMode == core.BILLING_MODE_PROVISIONED {
-			n := 1
-			if req.ConsistentRead {
-				n = 2
+	// Create filter function for Query-specific logic
+	queryFilter := func(entry *core.Entry) (bool, error) {
+		if req.SortKeyPredicate != nil {
+			match, err := (*req.SortKeyPredicate)(entry)
+			if err != nil {
+				return false, err
 			}
-			if !rateLimiter.AllowN(time.Now(), n) {
-				return nil, RateLimitReachedError
+			if !match {
+				return false, nil
 			}
 		}
-
-		var tuple Tuple
-		scannedCount += 1
-		if err := json.Unmarshal(body, &tuple); err != nil {
-			return nil, err
-		}
-
-		entry := tuple.getEntry(req.ConsistentRead, readTs, isGsi)
-
-		if entry != nil {
-			if req.SortKeyPredicate != nil {
-				match, err := (*req.SortKeyPredicate)(entry)
-				if err != nil {
-					return nil, err
-				}
-				if !match {
-					continue
-				}
+		if req.Filter != nil {
+			matched, err := req.Filter.Check(entry)
+			if err != nil {
+				return false, err
 			}
-			if req.Filter != nil {
-				matched, err := req.Filter.Check(entry)
-				if err != nil {
-					return nil, err
-				}
-				if !matched {
-					continue
-				}
+			if !matched {
+				return false, nil
 			}
-			results = append(results, entry)
 		}
-
-		if len(results) >= req.Limit {
-			break
-		}
+		return true, nil
 	}
-	res.Entries = results
-	res.ScannedCount = int32(scannedCount)
+
+	entries, scannedCount, err := s.processRowsForSearch(rows, tableMetadata, tableInfo, readTs, req.ConsistentRead, req.Limit, queryFilter)
+	if err != nil {
+		return nil, err
+	}
+
+	res.Entries = entries
+	res.ScannedCount = scannedCount
 
 	return res, txn.Commit()
 }
@@ -183,7 +230,6 @@ type ScanResponse struct {
 }
 
 func (s *InnerStorage) Scan(req *scan.Request) (*ScanResponse, error) {
-	// TODO: refactor duplicate code with Query
 	txn, err := s.BeginTxn()
 	if err != nil {
 		return nil, err
@@ -197,20 +243,12 @@ func (s *InnerStorage) Scan(req *scan.Request) (*ScanResponse, error) {
 
 	res := &ScanResponse{}
 
-	tableName := tableMetadata.Name
-	rateLimiter := tableMetadata.readRateLimiter
-	isGsi := false
-	if req.IndexName != nil {
-		gsi, ok := tableMetadata.GlobalSecondaryIndexSettings[*req.IndexName]
-		if !ok {
-			return nil, fmt.Errorf("index %s not found", *req.IndexName)
-		}
-		tableName = gsi.IndexTableName
-		rateLimiter = gsi.readRateLimiter
-		isGsi = true
+	tableInfo, err := s.resolveTableForSearch(tableMetadata, req.IndexName)
+	if err != nil {
+		return nil, err
 	}
 
-	queryStmt := "SELECT body FROM " + tableName + " WHERE 1=1"
+	queryStmt := "SELECT body FROM " + tableInfo.tableName + " WHERE 1=1"
 	args := []interface{}{}
 	if req.ExclusiveStartKey != nil {
 		queryStmt += " AND primary_key > ?"
@@ -224,7 +262,7 @@ func (s *InnerStorage) Scan(req *scan.Request) (*ScanResponse, error) {
 
 	queryStmt += " ORDER BY primary_key"
 
-	readTs, err := s.readTs(req.TableName, isGsi)
+	readTs, err := s.readTs(req.TableName, tableInfo.isGsi)
 	if err != nil {
 		return nil, err
 	}
@@ -235,54 +273,26 @@ func (s *InnerStorage) Scan(req *scan.Request) (*ScanResponse, error) {
 	}
 	defer rows.Close()
 
-	var results []*core.Entry
-	scannedCount := 0
-
-	i := int32(0)
-	for rows.Next() {
-		if tableMetadata.billingMode == core.BILLING_MODE_PROVISIONED {
-			n := 1
-			if req.ConsistentRead {
-				n = 2
+	// Create filter function for Scan-specific logic
+	scanFilter := func(entry *core.Entry) (bool, error) {
+		if req.Filter != nil {
+			matched, err := req.Filter.Check(entry)
+			if err != nil {
+				return false, err
 			}
-			if !rateLimiter.AllowN(time.Now(), n) {
-				return nil, RateLimitReachedError
+			if !matched {
+				return false, nil
 			}
 		}
-
-		scannedCount += 1
-		var tuple Tuple
-		var body []byte
-
-		if err := rows.Scan(&body); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal(body, &tuple); err != nil {
-			return nil, err
-		}
-		entry := tuple.getEntry(req.ConsistentRead, readTs, isGsi)
-
-		if entry != nil {
-			if req.Filter != nil {
-				matched, err := req.Filter.Check(entry)
-				if err != nil {
-					return nil, err
-				}
-				if !matched {
-					i++
-					continue
-				}
-			}
-
-			results = append(results, entry)
-		}
-
-		if len(results) >= req.Limit {
-			break
-		}
-		i++
+		return true, nil
 	}
-	res.Entries = results
-	res.ScannedCount = int32(scannedCount)
+
+	entries, scannedCount, err := s.processRowsForSearch(rows, tableMetadata, tableInfo, readTs, req.ConsistentRead, req.Limit, scanFilter)
+	if err != nil {
+		return nil, err
+	}
+
+	res.Entries = entries
+	res.ScannedCount = scannedCount
 	return res, txn.Commit()
 }

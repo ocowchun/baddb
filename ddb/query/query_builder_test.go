@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/ocowchun/baddb/ddb/core"
-	"github.com/ocowchun/baddb/expression"
+	"github.com/ocowchun/baddb/ddb/expression"
 	"testing"
 )
 

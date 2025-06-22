@@ -8,11 +8,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/ocowchun/baddb/ddb/condition"
 	"github.com/ocowchun/baddb/ddb/core"
+	"github.com/ocowchun/baddb/ddb/expression"
 	"github.com/ocowchun/baddb/ddb/query"
 	"github.com/ocowchun/baddb/ddb/request"
 	"github.com/ocowchun/baddb/ddb/scan"
 	"github.com/ocowchun/baddb/ddb/storage"
-	"github.com/ocowchun/baddb/expression"
 	"sync"
 	"time"
 )

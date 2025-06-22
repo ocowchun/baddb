@@ -3,7 +3,7 @@ package ast
 import (
 	"bytes"
 	"fmt"
-	"github.com/ocowchun/baddb/expression/token"
+	"github.com/ocowchun/baddb/ddb/expression/token"
 )
 
 type Node interface {

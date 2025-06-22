@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/ocowchun/baddb/expression/token"
+	"github.com/ocowchun/baddb/ddb/expression/token"
 	"io"
 	"unicode"
 )
