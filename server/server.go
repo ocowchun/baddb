@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ocowchun/baddb/ddb"
 	"github.com/ocowchun/baddb/ddb/inner_storage"
-	"github.com/ocowchun/baddb/encoding"
+	"github.com/ocowchun/baddb/server/encoding"
 	"hash/crc32"
 	"io"
 	"log"

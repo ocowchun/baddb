@@ -10,7 +10,6 @@ RUN go mod download
 
 COPY cli/ cli/
 COPY ddb/ ddb/
-COPY encoding/ encoding/
 COPY expression/ expression/
 COPY server/ server/
 
