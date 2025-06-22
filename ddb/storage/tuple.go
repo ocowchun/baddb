@@ -1,4 +1,4 @@
-package inner_storage
+package storage
 
 import (
 	"github.com/ocowchun/baddb/ddb/core"

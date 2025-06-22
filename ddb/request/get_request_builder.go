@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/ocowchun/baddb/ddb/core"
-	"github.com/ocowchun/baddb/ddb/inner_storage"
+	"github.com/ocowchun/baddb/ddb/storage"
 )
 
 type GetRequestBuilder struct {
@@ -12,7 +12,7 @@ type GetRequestBuilder struct {
 	TableMetaData *core.TableMetaData
 }
 
-func (b *GetRequestBuilder) Build() (*inner_storage.GetRequest, error) {
+func (b *GetRequestBuilder) Build() (*storage.GetRequest, error) {
 
 	consistentRead := false
 	if b.Input.ConsistentRead != nil {
@@ -40,7 +40,7 @@ func (b *GetRequestBuilder) Build() (*inner_storage.GetRequest, error) {
 		}
 	}
 
-	req := &inner_storage.GetRequest{
+	req := &storage.GetRequest{
 		Entry:          key,
 		ConsistentRead: consistentRead,
 		TableName:      b.TableMetaData.Name,

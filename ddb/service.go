@@ -8,10 +8,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/ocowchun/baddb/ddb/condition"
 	"github.com/ocowchun/baddb/ddb/core"
-	"github.com/ocowchun/baddb/ddb/inner_storage"
 	"github.com/ocowchun/baddb/ddb/query"
 	"github.com/ocowchun/baddb/ddb/request"
 	"github.com/ocowchun/baddb/ddb/scan"
+	"github.com/ocowchun/baddb/ddb/storage"
 	"github.com/ocowchun/baddb/expression"
 	"sync"
 	"time"
@@ -20,13 +20,13 @@ import (
 type Service struct {
 	tableLock          sync.RWMutex
 	tableMetadataStore map[string]*core.TableMetaData
-	storage            *inner_storage.InnerStorage
+	storage            *storage.InnerStorage
 }
 
 func NewDdbService() *Service {
-	innerStorage := inner_storage.NewInnerStorage()
+	innerStorage := storage.NewInnerStorage()
 	tableMetadatas := make(map[string]*core.TableMetaData)
-	tableMetadatas[inner_storage.METADATA_TABLE_NAME] = &core.TableMetaData{}
+	tableMetadatas[storage.METADATA_TABLE_NAME] = &core.TableMetaData{}
 
 	return &Service{
 		tableMetadataStore: tableMetadatas,
@@ -264,7 +264,7 @@ func (svc *Service) BatchGetItem(ctx context.Context, input *dynamodb.BatchGetIt
 			}
 			item, err := svc.GetItem(ctx, getItemInput)
 			if err != nil {
-				if errors.Is(err, inner_storage.ErrUnprocessed) {
+				if errors.Is(err, storage.ErrUnprocessed) {
 					unprocessedSummary, ok := unprocessedKeys[tableName]
 					if !ok {
 						unprocessedSummary = types.KeysAndAttributes{}
@@ -363,7 +363,7 @@ func (svc *Service) BatchWriteItem(ctx context.Context, input *dynamodb.BatchWri
 			}
 
 			if err != nil {
-				if errors.Is(err, inner_storage.ErrUnprocessed) {
+				if errors.Is(err, storage.ErrUnprocessed) {
 					unprocessedSummary, ok := unprocessedItems[tableName]
 					if !ok {
 						unprocessedSummary = make([]types.WriteRequest, 0)
@@ -405,7 +405,7 @@ func (svc *Service) PutItem(ctx context.Context, input *dynamodb.PutItemInput) (
 		}
 		err = svc.storage.Put(req)
 		if err != nil {
-			if errors.Is(err, inner_storage.RateLimitReachedError) {
+			if errors.Is(err, storage.RateLimitReachedError) {
 				return nil, ProvisionedThroughputExceededException
 
 			}
@@ -726,7 +726,7 @@ func (svc *Service) validateTransactWriteItemsInput(input *dynamodb.TransactWrit
 
 	primaryKeys := make(map[string]map[string]bool)
 	for _, writeItem := range input.TransactItems {
-		var pk *inner_storage.PrimaryKey
+		var pk *storage.PrimaryKey
 		var tableName string
 		if writeItem.ConditionCheck != nil {
 			conditionCheck := writeItem.ConditionCheck
@@ -827,8 +827,8 @@ func (svc *Service) validateTransactWriteItemsInput(input *dynamodb.TransactWrit
 }
 
 // TODO: refactor it
-func (svc *Service) buildTablePrimaryKey(entry *core.Entry, table *core.TableMetaData) (*inner_storage.PrimaryKey, error) {
-	primaryKey := &inner_storage.PrimaryKey{
+func (svc *Service) buildTablePrimaryKey(entry *core.Entry, table *core.TableMetaData) (*storage.PrimaryKey, error) {
+	primaryKey := &storage.PrimaryKey{
 		PartitionKey: make([]byte, 0),
 		SortKey:      make([]byte, 0),
 	}
@@ -926,7 +926,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 				}
 			}
 
-			req := &inner_storage.GetRequest{
+			req := &storage.GetRequest{
 				Entry:          key,
 				TableName:      tableName,
 				ConsistentRead: true,
@@ -1051,7 +1051,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 }
 
 func buildTransactErr(err error) error {
-	var conditionalCheckFailedException *inner_storage.ConditionalCheckFailedException
+	var conditionalCheckFailedException *storage.ConditionalCheckFailedException
 	if errors.As(err, &conditionalCheckFailedException) {
 		return &TransactionCanceledException{
 			rawError: err,
@@ -1062,7 +1062,7 @@ func buildTransactErr(err error) error {
 				},
 			},
 		}
-	} else if errors.Is(err, inner_storage.RateLimitReachedError) {
+	} else if errors.Is(err, storage.RateLimitReachedError) {
 		return ProvisionedThroughputExceededException
 	} else {
 		return err

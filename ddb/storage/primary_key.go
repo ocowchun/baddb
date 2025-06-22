@@ -1,4 +1,4 @@
-package inner_storage
+package storage
 
 import (
 	"bytes"

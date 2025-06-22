@@ -5,7 +5,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/ocowchun/baddb/ddb/condition"
 	"github.com/ocowchun/baddb/ddb/core"
-	"github.com/ocowchun/baddb/ddb/inner_storage"
+	"github.com/ocowchun/baddb/ddb/storage"
 )
 
 type PutRequestBuilder struct {
@@ -16,7 +16,7 @@ type PutRequestBuilder struct {
 	TableName                 *string
 }
 
-func (b *PutRequestBuilder) Build() (*inner_storage.PutRequest, error) {
+func (b *PutRequestBuilder) Build() (*storage.PutRequest, error) {
 	if b.TableName == nil {
 		return nil, fmt.Errorf("TableName is required")
 	}
@@ -45,7 +45,7 @@ func (b *PutRequestBuilder) Build() (*inner_storage.PutRequest, error) {
 		}
 	}
 
-	req := &inner_storage.PutRequest{
+	req := &storage.PutRequest{
 		Entry:     entry,
 		TableName: tableName,
 		Condition: cond,

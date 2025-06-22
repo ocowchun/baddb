@@ -8,7 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/google/uuid"
 	"github.com/ocowchun/baddb/ddb"
-	"github.com/ocowchun/baddb/ddb/inner_storage"
+	"github.com/ocowchun/baddb/ddb/storage"
 	"github.com/ocowchun/baddb/server/encoding"
 	"hash/crc32"
 	"io"
@@ -34,7 +34,7 @@ func handleDdbError(w http.ResponseWriter, outputErr error) {
 	var resourceNotFoundException *types.ResourceNotFoundException
 	var validationException *ddb.ValidationException
 	var provisionedThroughputExceededException *types.ProvisionedThroughputExceededException
-	var conditionalCheckFailedException *inner_storage.ConditionalCheckFailedException
+	var conditionalCheckFailedException *storage.ConditionalCheckFailedException
 	var transactionCanceledException *ddb.TransactionCanceledException
 	log.Println("handle err", outputErr)
 	switch {

@@ -78,8 +78,8 @@ go mod tidy
 - Coordinates between HTTP layer and storage layer
 - Manages table metadata and enforces DynamoDB constraints
 
-**Storage Layer** (`ddb/inner_storage/`)
-- `inner_storage.go`: SQLite-based storage engine
+**Storage Layer** (`ddb/storage/`)
+- `storage.go`: SQLite-based storage engine
 - `tuple.go`: Handles eventual consistency simulation with time-based tuples
 - `primary_key.go`: Key management and serialization
 

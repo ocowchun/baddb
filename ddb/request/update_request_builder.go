@@ -5,7 +5,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/ocowchun/baddb/ddb/condition"
 	"github.com/ocowchun/baddb/ddb/core"
-	"github.com/ocowchun/baddb/ddb/inner_storage"
+	"github.com/ocowchun/baddb/ddb/storage"
 	"github.com/ocowchun/baddb/ddb/update"
 )
 
@@ -18,7 +18,7 @@ type UpdateRequestBuilder struct {
 	Key                       map[string]types.AttributeValue
 }
 
-func (b *UpdateRequestBuilder) Build() (*inner_storage.UpdateRequest, error) {
+func (b *UpdateRequestBuilder) Build() (*storage.UpdateRequest, error) {
 	if b.TableName == nil {
 		return nil, fmt.Errorf("TableName is required")
 	}
@@ -62,7 +62,7 @@ func (b *UpdateRequestBuilder) Build() (*inner_storage.UpdateRequest, error) {
 		return nil, err
 	}
 
-	req := &inner_storage.UpdateRequest{
+	req := &storage.UpdateRequest{
 		Key:             key,
 		UpdateOperation: updateOperation,
 		TableName:       tableName,

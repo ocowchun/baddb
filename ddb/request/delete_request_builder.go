@@ -5,7 +5,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/ocowchun/baddb/ddb/condition"
 	"github.com/ocowchun/baddb/ddb/core"
-	"github.com/ocowchun/baddb/ddb/inner_storage"
+	"github.com/ocowchun/baddb/ddb/storage"
 )
 
 type DeleteRequestBuilder struct {
@@ -16,7 +16,7 @@ type DeleteRequestBuilder struct {
 	Key                       map[string]types.AttributeValue
 }
 
-func (b *DeleteRequestBuilder) Build() (*inner_storage.DeleteRequest, error) {
+func (b *DeleteRequestBuilder) Build() (*storage.DeleteRequest, error) {
 	if b.TableName == nil {
 		return nil, fmt.Errorf("TableName is required")
 	}
@@ -41,7 +41,7 @@ func (b *DeleteRequestBuilder) Build() (*inner_storage.DeleteRequest, error) {
 		}
 	}
 
-	req := &inner_storage.DeleteRequest{
+	req := &storage.DeleteRequest{
 		Entry:     entry,
 		TableName: tableName,
 		Condition: cond,
