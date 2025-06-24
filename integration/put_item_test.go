@@ -11,35 +11,46 @@ import (
 func TestPutItemBehavior(t *testing.T) {
 
 	tests := []struct {
-		name            string
-		condition       *string
-		expectErr       bool
-		hasPreviousItem bool
+		name       string
+		condition  *string
+		expectErr  bool
+		existsItem map[string]types.AttributeValue
 	}{
 		{
-			name:            "normal insert",
-			condition:       nil,
-			expectErr:       false,
-			hasPreviousItem: false,
+			name:       "normal insert",
+			condition:  nil,
+			expectErr:  false,
+			existsItem: nil,
 		},
 		{
-			name:            "conditional insert success",
-			condition:       aws.String("attribute_not_exists(title)"),
-			expectErr:       false,
-			hasPreviousItem: false,
+			name:       "conditional insert success",
+			condition:  aws.String("attribute_not_exists(title)"),
+			expectErr:  false,
+			existsItem: nil,
 		},
 		{
-			name:            "conditional insert fails",
-			condition:       aws.String("attribute_not_exists(title)"),
-			expectErr:       true,
-			hasPreviousItem: true, // This means we insert an item first to make the condition fail
+			name:      "conditional insert fails",
+			condition: aws.String("attribute_not_exists(title)"),
+			expectErr: true,
+			existsItem: map[string]types.AttributeValue{
+				"year":     &types.AttributeValueMemberN{Value: "2024"},
+				"title":    &types.AttributeValueMemberS{Value: "The Shawshank Redemption"},
+				"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "9.0"}}},
+				"language": &types.AttributeValueMemberS{Value: "English"},
+			},
 		},
 		{
-			name:            "conditional insert fails due to reserved keyword",
-			condition:       aws.String("attribute_not_exists(language)"),
-			expectErr:       true,
-			hasPreviousItem: false,
+			name:       "conditional insert fails due to reserved keyword",
+			condition:  aws.String("attribute_not_exists(language)"),
+			expectErr:  true,
+			existsItem: nil,
 		},
+	}
+	newItem := map[string]types.AttributeValue{
+		"year":     &types.AttributeValueMemberN{Value: "2024"},
+		"title":    &types.AttributeValueMemberS{Value: "The Shawshank Redemption"},
+		"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "9.3"}}},
+		"language": &types.AttributeValueMemberS{Value: "English"},
 	}
 
 	for _, tt := range tests {
@@ -55,13 +66,25 @@ func TestPutItemBehavior(t *testing.T) {
 		}
 
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.hasPreviousItem {
-				_, _ = putItemWithCondition(ddbLocal, nil)
-				_, _ = putItemWithCondition(baddb, nil)
+			if tt.existsItem != nil {
+				input := &dynamodb.PutItemInput{
+					TableName: aws.String("movie"),
+					Item:      tt.existsItem,
+				}
+				_, _ = putItem(ddbLocal, input)
+				_, _ = putItem(baddb, input)
 			}
 
-			ddbOut, ddbErr := putItemWithCondition(ddbLocal, tt.condition)
-			baddbOut, baddbErr := putItemWithCondition(baddb, tt.condition)
+			input := &dynamodb.PutItemInput{
+				TableName: aws.String("movie"),
+				Item:      newItem,
+			}
+			if tt.condition != nil {
+				input.ConditionExpression = tt.condition
+			}
+
+			ddbOut, ddbErr := putItem(ddbLocal, input)
+			baddbOut, baddbErr := putItem(baddb, input)
 
 			if (ddbErr != nil) != tt.expectErr {
 				t.Errorf("ddbLocal: expected error=%v, got %v", tt.expectErr, ddbErr)
@@ -87,19 +110,7 @@ func TestPutItemBehavior(t *testing.T) {
 	}
 }
 
-func putItemWithCondition(client *dynamodb.Client, condition *string) (*dynamodb.PutItemOutput, error) {
-	input := &dynamodb.PutItemInput{
-		TableName: aws.String("movie"),
-		Item: map[string]types.AttributeValue{
-			"year":     &types.AttributeValueMemberN{Value: "2024"},
-			"title":    &types.AttributeValueMemberS{Value: "The Shawshank Redemption"},
-			"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "9.3"}}},
-			"language": &types.AttributeValueMemberS{Value: "English"},
-		},
-	}
-	if condition != nil {
-		input.ConditionExpression = condition
-	}
+func putItem(client *dynamodb.Client, input *dynamodb.PutItemInput) (*dynamodb.PutItemOutput, error) {
 	return client.PutItem(context.TODO(), input)
 }
 

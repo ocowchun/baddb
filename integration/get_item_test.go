@@ -11,27 +11,32 @@ import (
 func TestGetItemBehavior(t *testing.T) {
 	tests := []struct {
 		name        string
-		insertItem  bool
 		key         map[string]types.AttributeValue
 		expectFound bool
+		existsItem  map[string]types.AttributeValue
 	}{
 		{
-			name:       "get existing item",
-			insertItem: true,
+			name: "get existing item",
 			key: map[string]types.AttributeValue{
 				"year":  &types.AttributeValueMemberN{Value: "2024"},
 				"title": &types.AttributeValueMemberS{Value: "The Shawshank Redemption"},
 			},
 			expectFound: true,
+			existsItem: map[string]types.AttributeValue{
+				"year":     &types.AttributeValueMemberN{Value: "2024"},
+				"title":    &types.AttributeValueMemberS{Value: "The Shawshank Redemption"},
+				"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "9.3"}}},
+				"language": &types.AttributeValueMemberS{Value: "English"},
+			},
 		},
 		{
-			name:       "get non-existent item",
-			insertItem: false,
+			name: "get non-existent item",
 			key: map[string]types.AttributeValue{
 				"year":  &types.AttributeValueMemberN{Value: "1999"},
 				"title": &types.AttributeValueMemberS{Value: "The Matrix"},
 			},
 			expectFound: false,
+			existsItem:  nil,
 		},
 	}
 
@@ -40,12 +45,16 @@ func TestGetItemBehavior(t *testing.T) {
 		ddbLocal := testContext.ddbLocal
 		baddb := testContext.baddb
 
-		if tt.insertItem {
-			_, err := putItemWithCondition(ddbLocal, nil)
+		if tt.existsItem != nil {
+			input := &dynamodb.PutItemInput{
+				TableName: aws.String(TestTableName),
+				Item:      tt.existsItem,
+			}
+			_, err := putItem(ddbLocal, input)
 			if err != nil {
 				t.Fatalf("failed to request item in ddbLocal: %v", err)
 			}
-			_, err = putItemWithCondition(baddb, nil)
+			_, err = putItem(baddb, input)
 			if err != nil {
 				t.Fatalf("failed to request item in baddb: %v", err)
 			}

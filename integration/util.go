@@ -19,7 +19,12 @@ import (
 	"testing"
 )
 
-const TestTableName = "movie"
+const (
+	TestTableName = "movie"
+	BaddbPort     = 8080
+	DdbLocalPort  = 8000
+	DefaultLimit  = 2
+)
 
 func cleanDdbLocal(client *dynamodb.Client) {
 	// Clean up the table
@@ -40,7 +45,7 @@ func newBaddbClient() *dynamodb.Client {
 
 	// Using the Config value, create the DynamoDB client
 	client := dynamodb.NewFromConfig(cfg, func(options *dynamodb.Options) {
-		options.BaseEndpoint = aws.String("http://localhost:8080")
+		options.BaseEndpoint = aws.String(fmt.Sprintf("http://localhost:%d", BaddbPort))
 	})
 
 	return client
@@ -54,7 +59,7 @@ func newDdbLocalClient() *dynamodb.Client {
 
 	// Using the Config value, create the DynamoDB client
 	client := dynamodb.NewFromConfig(cfg, func(options *dynamodb.Options) {
-		options.BaseEndpoint = aws.String("http://localhost:8000")
+		options.BaseEndpoint = aws.String(fmt.Sprintf("http://localhost:%d", DdbLocalPort))
 	})
 
 	return client
@@ -115,13 +120,12 @@ func startServer() func() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", svr.Handler)
 
-	port := 8080
 	server := &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
+		Addr:    fmt.Sprintf(":%d", BaddbPort),
 		Handler: mux,
 	}
 
-	log.Printf("baddb server is running on port %d...", port)
+	log.Printf("baddb server is running on port %d...", BaddbPort)
 
 	go func() {
 		err := server.ListenAndServe()

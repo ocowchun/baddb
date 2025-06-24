@@ -10,40 +10,60 @@ import (
 
 func TestUpdateItemBehavior(t *testing.T) {
 	tests := []struct {
-		name            string
-		condition       *string
-		expectErr       bool
-		hasPreviousItem bool
+		name       string
+		condition  *string
+		expectErr  bool
+		existsItem map[string]types.AttributeValue
 	}{
 		{
-			name:            "normal update when item does not exist",
-			condition:       nil,
-			expectErr:       false,
-			hasPreviousItem: false,
+			name:      "normal update when item does not exist",
+			condition: nil,
+			expectErr: false,
+			existsItem: map[string]types.AttributeValue{
+				"year":     &types.AttributeValueMemberN{Value: "2024"},
+				"title":    &types.AttributeValueMemberS{Value: "The Shawshank Redemption"},
+				"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "9.3"}}},
+				"language": &types.AttributeValueMemberS{Value: "English"},
+			},
 		},
 		{
-			name:            "normal update",
-			condition:       nil,
-			expectErr:       false,
-			hasPreviousItem: true,
+			name:      "normal update",
+			condition: nil,
+			expectErr: false,
+			existsItem: map[string]types.AttributeValue{
+				"year":     &types.AttributeValueMemberN{Value: "2024"},
+				"title":    &types.AttributeValueMemberS{Value: "The Shawshank Redemption"},
+				"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "9.3"}}},
+				"language": &types.AttributeValueMemberS{Value: "English"},
+			},
 		},
 		{
-			name:            "conditional update success",
-			condition:       aws.String("attribute_exists(title)"),
-			expectErr:       false,
-			hasPreviousItem: true,
+			name:      "conditional update success",
+			condition: aws.String("attribute_exists(title)"),
+			expectErr: false,
+			existsItem: map[string]types.AttributeValue{
+				"year":     &types.AttributeValueMemberN{Value: "2024"},
+				"title":    &types.AttributeValueMemberS{Value: "The Shawshank Redemption"},
+				"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "9.3"}}},
+				"language": &types.AttributeValueMemberS{Value: "English"},
+			},
 		},
 		{
-			name:            "conditional update fails",
-			condition:       aws.String("attribute_not_exists(title)"),
-			expectErr:       true,
-			hasPreviousItem: true,
+			name:      "conditional update fails",
+			condition: aws.String("attribute_not_exists(title)"),
+			expectErr: true,
+			existsItem: map[string]types.AttributeValue{
+				"year":     &types.AttributeValueMemberN{Value: "2024"},
+				"title":    &types.AttributeValueMemberS{Value: "The Shawshank Redemption"},
+				"info":     &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{"rating": &types.AttributeValueMemberN{Value: "9.3"}}},
+				"language": &types.AttributeValueMemberS{Value: "English"},
+			},
 		},
 		{
-			name:            "conditional update fails due to reserved keyword",
-			condition:       aws.String("attribute_not_exists(language)"),
-			expectErr:       true,
-			hasPreviousItem: false,
+			name:       "conditional update fails due to reserved keyword",
+			condition:  aws.String("attribute_not_exists(language)"),
+			expectErr:  true,
+			existsItem: nil,
 		},
 	}
 
@@ -60,9 +80,13 @@ func TestUpdateItemBehavior(t *testing.T) {
 		}
 
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.hasPreviousItem {
-				_, _ = putItemWithCondition(ddbLocal, nil)
-				_, _ = putItemWithCondition(baddb, nil)
+			if tt.existsItem != nil {
+				input := &dynamodb.PutItemInput{
+					TableName: aws.String(TestTableName),
+					Item:      tt.existsItem,
+				}
+				_, _ = putItem(ddbLocal, input)
+				_, _ = putItem(baddb, input)
 			}
 
 			ddbOut, ddbErr := updateItemWithCondition(ddbLocal, tt.condition)
