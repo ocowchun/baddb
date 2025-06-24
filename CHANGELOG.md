@@ -1,3 +1,7 @@
+## 0.2.6 / 2025-06-24
+* Fix `attribute_type` condition
+* Add more test cases
+
 ## 0.2.5 / 2025-06-18
 * Improve `TransactWriteItems` error response 
 
