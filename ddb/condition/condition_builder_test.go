@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestBuildComparatorCondition(t *testing.T) {
+func TestConditionBuilder_BuildComparatorCondition(t *testing.T) {
 	entries := []*core.Entry{
 		{
 			Body: map[string]core.AttributeValue{
@@ -82,7 +82,7 @@ func TestBuildComparatorCondition(t *testing.T) {
 	}
 }
 
-func TestBuildBetweenCondition(t *testing.T) {
+func TestConditionBuilder_BuildBetweenCondition(t *testing.T) {
 	entries := []*core.Entry{
 		{
 			Body: map[string]core.AttributeValue{
@@ -141,7 +141,7 @@ func TestBuildBetweenCondition(t *testing.T) {
 	}
 }
 
-func TestBuildInCondition(t *testing.T) {
+func TestConditionBuilder_BuildInCondition(t *testing.T) {
 	entries := []*core.Entry{
 		{
 			Body: map[string]core.AttributeValue{
@@ -200,7 +200,7 @@ func TestBuildInCondition(t *testing.T) {
 	}
 }
 
-func TestBuildFunctionCondition(t *testing.T) {
+func TestConditionBuilder_BuildFunctionCondition(t *testing.T) {
 	entries := []*core.Entry{
 		{
 			Body: map[string]core.AttributeValue{
@@ -273,7 +273,7 @@ func TestBuildFunctionCondition(t *testing.T) {
 	}
 }
 
-func TestBuildAndConditionExpression(t *testing.T) {
+func TestConditionBuilder_BuildAndConditionExpression(t *testing.T) {
 	entries := []*core.Entry{
 		{
 			Body: map[string]core.AttributeValue{
@@ -338,7 +338,7 @@ func TestBuildAndConditionExpression(t *testing.T) {
 	}
 }
 
-func TestBuildOrConditionExpression(t *testing.T) {
+func TestConditionBuilder_BuildOrConditionExpression(t *testing.T) {
 	entries := []*core.Entry{
 		{
 			Body: map[string]core.AttributeValue{
@@ -395,7 +395,7 @@ func TestBuildOrConditionExpression(t *testing.T) {
 	}
 }
 
-func TestBuildNotCondition(t *testing.T) {
+func TestConditionBuilder_BuildNotCondition(t *testing.T) {
 	entries := []*core.Entry{
 		{
 			Body: map[string]core.AttributeValue{
@@ -446,6 +446,56 @@ func TestBuildNotCondition(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestConditionBuilder_BuildAttributeTypeFunction(t *testing.T) {
+
+	entries := []*core.Entry{
+		{
+			Body: map[string]core.AttributeValue{
+				"createdYear": {N: aws.String("2024")},
+			},
+		},
+		{
+			Body: map[string]core.AttributeValue{
+				"createdYear": {S: aws.String("2025")},
+			},
+		},
+	}
+
+	tests := []struct {
+		exp      string
+		expected []bool
+	}{
+		{
+			exp:      "attribute_type(createdYear, :type)",
+			expected: []bool{true, false},
+		},
+	}
+
+	for _, tt := range tests {
+		condition, err := BuildCondition(
+			tt.exp,
+			make(map[string]string),
+			map[string]core.AttributeValue{
+				":type": {S: aws.String("N")},
+			})
+		if err != nil {
+			t.Fatalf("unexpected error: %v when building condition %s", err, tt.exp)
+		}
+
+		for i, entry := range entries {
+			result, err := condition.Check(entry)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if result != tt.expected[i] {
+				t.Fatalf("expected %v but got %v for condition %s", tt.expected[i], result, tt.exp)
+			}
+		}
+	}
+
 }
 
 func TestBuildConditionReservedWord(t *testing.T) {

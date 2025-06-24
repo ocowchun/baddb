@@ -70,7 +70,7 @@ func TestParseFunctionConditionExpression(t *testing.T) {
 	}{
 		{"attribute_exists(attributeName)", "attribute_exists(attributeName)"},
 		{"attribute_not_exists(attributeName)", "attribute_not_exists(attributeName)"},
-		{"attribute_type(attributeName, S)", "attribute_type(attributeName, S)"},
+		{"attribute_type(attributeName, :type)", "attribute_type(attributeName, :type)"},
 		{"begins_with(attributeName, prefix)", "begins_with(attributeName, prefix)"},
 		{"contains(attributeName, operand)", "contains(attributeName, operand)"},
 	}

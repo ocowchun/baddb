@@ -576,14 +576,9 @@ func (p *Parser) parseFunctionConditionExpression() (ast.FunctionExpression, err
 		}
 		p.nextToken()
 
-		// TODO: refactor parse type later
-		i, err := p.parseIdentifier()
+		dataType, err := p.parseOperand()
 		if err != nil {
 			return nil, err
-		}
-		identifier, ok := i.(*ast.Identifier)
-		if !ok {
-			return nil, fmt.Errorf("failed to parse identifier")
 		}
 
 		if !p.expectPeek(token.RPAREN) {
@@ -592,7 +587,7 @@ func (p *Parser) parseFunctionConditionExpression() (ast.FunctionExpression, err
 
 		return &ast.AttributeTypeFunctionExpression{
 			Path: path,
-			Type: identifier.Value,
+			Type: dataType,
 		}, nil
 	case token.BEGINS_WITH:
 		if !p.expectPeek(token.LPAREN) {

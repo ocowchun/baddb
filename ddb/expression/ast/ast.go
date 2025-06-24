@@ -255,7 +255,7 @@ func (fane *AttributeNotExistsFunctionExpression) String() string {
 
 type AttributeTypeFunctionExpression struct {
 	Path Operand
-	Type string
+	Type Operand
 }
 
 func (fate *AttributeTypeFunctionExpression) functionExpressionNode() {}
@@ -264,7 +264,7 @@ func (fate *AttributeTypeFunctionExpression) String() string {
 	out.WriteString("attribute_type(")
 	out.WriteString(fate.Path.String())
 	out.WriteString(", ")
-	out.WriteString(fate.Type)
+	out.WriteString(fate.Type.String())
 	out.WriteString(")")
 	return out.String()
 }

@@ -385,13 +385,25 @@ func (b *ConditionBuilder) BuildAttributeTypeFunction(exp *ast.AttributeTypeFunc
 		return nil, err
 	}
 
+	dataType, err := b.buildOperand(exp.Type)
+	if err != nil {
+		return nil, err
+	}
+
+	var dataTypeName string
+	if val, ok := dataType.(*AttributeValueOperand); ok && val.Value.S != nil {
+		dataTypeName = *val.Value.S
+	} else {
+		return nil, fmt.Errorf("attribute type must be a string, but got %T", dataType)
+	}
+
 	f := func(entry *core.Entry) (bool, error) {
 		val, err := getValue(entry, operand)
 		if err != nil {
 			return false, err
 		}
 
-		return val.Type() == exp.Type, nil
+		return val.Type() == dataTypeName, nil
 	}
 
 	return &Condition{
