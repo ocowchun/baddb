@@ -948,3 +948,37 @@ func EncodeScanOutput(output *dynamodb.ScanOutput) ([]byte, error) {
 	bs, err := json.Marshal(output2)
 	return bs, err
 }
+
+func DecodeUpdateTableInput(reader io.ReadCloser) (*dynamodb.UpdateTableInput, error) {
+	defer func() {
+		if err := reader.Close(); err != nil {
+			log.Printf("Error closing request body: %v", err)
+		}
+	}()
+
+	var input dynamodb.UpdateTableInput
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+
+	err = json.Unmarshal(body, &input)
+
+	return &input, err
+}
+
+type updateTableOutput struct {
+	TableDescription *tableDescription
+
+	ResultMetadata middleware.Metadata
+}
+
+func EncodeUpdateTableOutput(output *dynamodb.UpdateTableOutput) ([]byte, error) {
+	output2 := updateTableOutput{
+		TableDescription: newTableDescription(output.TableDescription),
+		ResultMetadata:   output.ResultMetadata,
+	}
+
+	bs, err := json.Marshal(output2)
+	return bs, err
+}

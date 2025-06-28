@@ -315,6 +315,20 @@ func (svr *DdbServer) Handler(w http.ResponseWriter, req *http.Request) {
 				return encoding.EncodeDescribeTableOutput(i.(*dynamodb.DescribeTableOutput))
 			},
 		)
+	case "UpdateTable":
+		genericHandler(
+			w,
+			req,
+			func(bs io.ReadCloser) (interface{}, error) {
+				return encoding.DecodeUpdateTableInput(bs)
+			},
+			func(ctx context.Context, input interface{}) (interface{}, error) {
+				return svr.inner.UpdateTable(ctx, input.(*dynamodb.UpdateTableInput))
+			},
+			func(i interface{}) ([]byte, error) {
+				return encoding.EncodeUpdateTableOutput(i.(*dynamodb.UpdateTableOutput))
+			},
+		)
 	case "DeleteTable":
 		genericHandler(
 			w,

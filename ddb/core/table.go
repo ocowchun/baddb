@@ -50,6 +50,89 @@ func (m *TableMetaData) FindKeySchema(attributeName string) *KeySchema {
 
 }
 
+func (m *TableMetaData) Clone() *TableMetaData {
+	clone := &TableMetaData{
+		Name:        m.Name,
+		BillingMode: m.BillingMode,
+	}
+
+	if len(m.AttributeDefinitions) > 0 {
+		clone.AttributeDefinitions = make([]types.AttributeDefinition, len(m.AttributeDefinitions))
+		copy(clone.AttributeDefinitions, m.AttributeDefinitions)
+	}
+
+	if len(m.KeySchema) > 0 {
+		clone.KeySchema = make([]types.KeySchemaElement, len(m.KeySchema))
+		copy(clone.KeySchema, m.KeySchema)
+	}
+
+	if len(m.GlobalSecondaryIndexSettings) > 0 {
+		clone.GlobalSecondaryIndexSettings = make([]GlobalSecondaryIndexSetting, len(m.GlobalSecondaryIndexSettings))
+		for i, gsi := range m.GlobalSecondaryIndexSettings {
+			clone.GlobalSecondaryIndexSettings[i] = GlobalSecondaryIndexSetting{
+				ProjectionType: gsi.ProjectionType,
+			}
+
+			if gsi.IndexName != nil {
+				indexName := *gsi.IndexName
+				clone.GlobalSecondaryIndexSettings[i].IndexName = &indexName
+			}
+
+			if gsi.PartitionKeySchema != nil {
+				clone.GlobalSecondaryIndexSettings[i].PartitionKeySchema = &KeySchema{
+					AttributeName: gsi.PartitionKeySchema.AttributeName,
+					AttributeType: gsi.PartitionKeySchema.AttributeType,
+				}
+			}
+
+			if gsi.SortKeySchema != nil {
+				clone.GlobalSecondaryIndexSettings[i].SortKeySchema = &KeySchema{
+					AttributeName: gsi.SortKeySchema.AttributeName,
+					AttributeType: gsi.SortKeySchema.AttributeType,
+				}
+			}
+
+			if len(gsi.NonKeyAttributes) > 0 {
+				clone.GlobalSecondaryIndexSettings[i].NonKeyAttributes = make([]string, len(gsi.NonKeyAttributes))
+				copy(clone.GlobalSecondaryIndexSettings[i].NonKeyAttributes, gsi.NonKeyAttributes)
+			}
+		}
+	}
+
+	if len(m.LocalSecondaryIndexes) > 0 {
+		clone.LocalSecondaryIndexes = make([]types.LocalSecondaryIndex, len(m.LocalSecondaryIndexes))
+		copy(clone.LocalSecondaryIndexes, m.LocalSecondaryIndexes)
+	}
+
+	if m.ProvisionedThroughput != nil {
+		clone.ProvisionedThroughput = &types.ProvisionedThroughput{
+			ReadCapacityUnits:  m.ProvisionedThroughput.ReadCapacityUnits,
+			WriteCapacityUnits: m.ProvisionedThroughput.WriteCapacityUnits,
+		}
+	}
+
+	if m.CreationDateTime != nil {
+		creationTime := *m.CreationDateTime
+		clone.CreationDateTime = &creationTime
+	}
+
+	if m.PartitionKeySchema != nil {
+		clone.PartitionKeySchema = &KeySchema{
+			AttributeName: m.PartitionKeySchema.AttributeName,
+			AttributeType: m.PartitionKeySchema.AttributeType,
+		}
+	}
+
+	if m.SortKeySchema != nil {
+		clone.SortKeySchema = &KeySchema{
+			AttributeName: m.SortKeySchema.AttributeName,
+			AttributeType: m.SortKeySchema.AttributeType,
+		}
+	}
+
+	return clone
+}
+
 func (m *TableMetaData) Description(itemCount int64) *types.TableDescription {
 	tableSizeBytes := itemCount * 100
 	keySchema := make([]types.KeySchemaElement, 0)

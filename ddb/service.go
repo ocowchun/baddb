@@ -656,6 +656,106 @@ func (svc *Service) Query(ctx context.Context, input *dynamodb.QueryInput) (*dyn
 	return output, nil
 }
 
+func (svc *Service) UpdateTable(ctx context.Context, input *dynamodb.UpdateTableInput) (*dynamodb.UpdateTableOutput, error) {
+	svc.tableLock.Lock()
+	defer svc.tableLock.Unlock()
+
+	tableName := *input.TableName
+	table, ok := svc.tableMetadataStore[tableName]
+	if !ok {
+		msg := "Cannot do operations on a non-existent table"
+		err := &types.ResourceNotFoundException{
+			Message: &msg,
+		}
+		return nil, err
+	}
+
+	originalTable := table.Clone()
+
+	if input.BillingMode != "" {
+		switch input.BillingMode {
+		case types.BillingModeProvisioned:
+			table.BillingMode = core.BILLING_MODE_PROVISIONED
+			if input.ProvisionedThroughput == nil && table.ProvisionedThroughput == nil {
+				svc.tableMetadataStore[tableName] = originalTable
+				msg := "ProvisionedThroughput must be specified when BillingMode is PROVISIONED"
+				err := &ValidationException{
+					Message: msg,
+				}
+				return nil, err
+			}
+		case types.BillingModePayPerRequest:
+			table.BillingMode = core.BILLING_MODE_PAY_PER_REQUEST
+			if input.ProvisionedThroughput != nil {
+				svc.tableMetadataStore[tableName] = originalTable
+				msg := "Cannot specify ProvisionedThroughput when BillingMode is PAY_PER_REQUEST"
+				err := &ValidationException{
+					Message: msg,
+				}
+				return nil, err
+			}
+			table.ProvisionedThroughput = nil
+		default:
+			svc.tableMetadataStore[tableName] = originalTable
+			msg := "Invalid billing mode"
+			err := &ValidationException{
+				Message: msg,
+			}
+			return nil, err
+		}
+	}
+
+	if input.ProvisionedThroughput != nil {
+		if table.BillingMode == core.BILLING_MODE_PAY_PER_REQUEST {
+			svc.tableMetadataStore[tableName] = originalTable
+			msg := "Cannot specify ProvisionedThroughput when table BillingMode is PAY_PER_REQUEST"
+			err := &ValidationException{
+				Message: msg,
+			}
+			return nil, err
+		}
+		if input.ProvisionedThroughput.ReadCapacityUnits != nil && *input.ProvisionedThroughput.ReadCapacityUnits < 1 {
+			svc.tableMetadataStore[tableName] = originalTable
+			msg := "Read capacity units must be greater than 0"
+			err := &ValidationException{
+				Message: msg,
+			}
+			return nil, err
+		}
+		if input.ProvisionedThroughput.WriteCapacityUnits != nil && *input.ProvisionedThroughput.WriteCapacityUnits < 1 {
+			svc.tableMetadataStore[tableName] = originalTable
+			msg := "Write capacity units must be greater than 0"
+			err := &ValidationException{
+				Message: msg,
+			}
+			return nil, err
+		}
+		table.ProvisionedThroughput = input.ProvisionedThroughput
+	}
+
+	if len(input.GlobalSecondaryIndexUpdates) > 0 {
+		svc.tableMetadataStore[tableName] = originalTable
+		msg := "GlobalSecondaryIndex updates are not supported"
+		err := &ValidationException{
+			Message: msg,
+		}
+		return nil, err
+	}
+
+	itemCount, err := svc.storage.QueryItemCount(tableName)
+	if err != nil {
+		svc.tableMetadataStore[tableName] = originalTable
+		return nil, err
+	}
+
+	tableDescription := table.Description(itemCount)
+	output := &dynamodb.UpdateTableOutput{
+		TableDescription: tableDescription,
+	}
+
+	return output, nil
+}
+
 func (svc *Service) DeleteTable(ctx context.Context, input *dynamodb.DeleteTableInput) (*dynamodb.DeleteTableOutput, error) {
 	svc.tableLock.Lock()
 	defer svc.tableLock.Unlock()
