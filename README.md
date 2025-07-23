@@ -79,6 +79,12 @@ aws dynamodb batch-write-item \
 ```
 
 
+## Not Supported
+### Number type
+baddb uses float64 to represent number, which is not compatible with DynamoDB's number type.
+https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.NamingRulesDataTypes.html#HowItWorks.DataTypes.Number
+
+
 ## Support
 ### BatchGetItem
 - [ ] AttributesToGet

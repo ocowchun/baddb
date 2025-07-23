@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"regexp"
 	"time"
 )
 
@@ -241,4 +242,21 @@ func (m *TableMetaData) Description(itemCount int64) *types.TableDescription {
 	}
 
 	return tableDescription
+}
+
+var validNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_.\-]{3,255}$`)
+
+// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.NamingRulesDataTypes.html#HowItWorks.DataTypes.Number
+func ValidateTableName(s string) error {
+	if len(s) < 3 || len(s) > 255 {
+		return errors.New("length must be between 3 and 255 characters")
+	}
+	if !validNameRegex.MatchString(s) {
+		return errors.New("contains invalid characters")
+	}
+	return nil
+}
+
+func ValidateIndexName(s string) error {
+	return ValidateTableName(s)
 }

@@ -64,6 +64,12 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 		return nil, err
 	}
 
+	if err := core.ValidateTableName(tableName); err != nil {
+		return nil, &ValidationException{
+			Message: err.Error(),
+		}
+	}
+
 	now := time.Now()
 	var partitionKeySchema *core.KeySchema
 	var sortKeySchema *core.KeySchema
@@ -122,6 +128,11 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 		nonKeyAttributes := make([]string, len(gsi.Projection.NonKeyAttributes))
 		for i, v := range gsi.Projection.NonKeyAttributes {
 			nonKeyAttributes[i] = v
+		}
+		if err := core.ValidateTableName(*gsi.IndexName); err != nil {
+			return nil, &ValidationException{
+				Message: err.Error(),
+			}
 		}
 
 		var partitionKey *core.KeySchema
@@ -810,7 +821,7 @@ func (svc *Service) processGSIUpdates(table *core.TableMetaData, updates []types
 				}
 				provisionedThroughput = pt
 			}
-			
+
 			op := storage.GSIOperation{
 				Type:    "UPDATE",
 				GSIName: *update.Update.IndexName,
@@ -841,6 +852,12 @@ func (svc *Service) processGSIUpdates(table *core.TableMetaData, updates []types
 func (svc *Service) validateGSICreate(table *core.TableMetaData, create *types.CreateGlobalSecondaryIndexAction) error {
 	if create.IndexName == nil || *create.IndexName == "" {
 		return &ValidationException{Message: "Index name is required"}
+	}
+
+	if err := core.ValidateTableName(*create.IndexName); err != nil {
+		return &ValidationException{
+			Message: err.Error(),
+		}
 	}
 
 	// For CREATE: GSI must NOT exist

@@ -1,3 +1,6 @@
+## nightly
+* validate table and index names 
+
 ## 0.2.7 / 2025-07-23
 * Support `UpdateTable` 
 
