@@ -44,6 +44,69 @@ type InnerTableMetadata struct {
 	unprocessedRequests          atomic.Uint32
 }
 
+func (m *InnerTableMetadata) Clone() *InnerTableMetadata {
+	clone := &InnerTableMetadata{
+		Name:                m.Name,
+		billingMode:         m.billingMode,
+		readCapacityUnits:   m.readCapacityUnits,
+		writeCapacityUnits:  m.writeCapacityUnits,
+		readRateLimiter:     m.readRateLimiter,
+		writeRateLimiter:    m.writeRateLimiter,
+		tableDelaySeconds:   m.tableDelaySeconds,
+		gsiDelaySeconds:     m.gsiDelaySeconds,
+		unprocessedRequests: atomic.Uint32{},
+	}
+
+	// Copy the unprocessed requests value
+	clone.unprocessedRequests.Store(m.unprocessedRequests.Load())
+
+	// Deep copy GlobalSecondaryIndexSettings
+	if len(m.GlobalSecondaryIndexSettings) > 0 {
+		clone.GlobalSecondaryIndexSettings = make(map[string]InnerTableGlobalSecondaryIndexSetting)
+		for name, gsi := range m.GlobalSecondaryIndexSettings {
+			clonedGSI := InnerTableGlobalSecondaryIndexSetting{
+				IndexTableName:   gsi.IndexTableName,
+				ProjectionType:   gsi.ProjectionType,
+				readRateLimiter:  gsi.readRateLimiter,
+			}
+
+			if gsi.PartitionKeyName != nil {
+				partitionKeyName := *gsi.PartitionKeyName
+				clonedGSI.PartitionKeyName = &partitionKeyName
+			}
+
+			if gsi.SortKeyName != nil {
+				sortKeyName := *gsi.SortKeyName
+				clonedGSI.SortKeyName = &sortKeyName
+			}
+
+			if len(gsi.NonKeyAttributes) > 0 {
+				clonedGSI.NonKeyAttributes = make([]string, len(gsi.NonKeyAttributes))
+				copy(clonedGSI.NonKeyAttributes, gsi.NonKeyAttributes)
+			}
+
+			clone.GlobalSecondaryIndexSettings[name] = clonedGSI
+		}
+	}
+
+	// Deep copy key schemas
+	if m.PartitionKeySchema != nil {
+		clone.PartitionKeySchema = &core.KeySchema{
+			AttributeName: m.PartitionKeySchema.AttributeName,
+			AttributeType: m.PartitionKeySchema.AttributeType,
+		}
+	}
+
+	if m.SortKeySchema != nil {
+		clone.SortKeySchema = &core.KeySchema{
+			AttributeName: m.SortKeySchema.AttributeName,
+			AttributeType: m.SortKeySchema.AttributeType,
+		}
+	}
+
+	return clone
+}
+
 func NewInnerStorage() *InnerStorage {
 	db, err := sql.Open("sqlite3", ":memory:")
 
@@ -84,8 +147,8 @@ func (s *InnerStorage) CreateTable(meta *core.TableMetaData) error {
 		// For an item up to 4 KB, one read capacity unit (RCU) represents one strongly consistent read operation per
 		// second, or two eventually consistent read operations per second.
 		// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/provisioned-capacity-mode.html#read-write-capacity-units
-		readCapacity = int(*meta.ProvisionedThroughput.ReadCapacityUnits) * 2
-		writeCapacity = int(*meta.ProvisionedThroughput.WriteCapacityUnits)
+		readCapacity = meta.ProvisionedThroughput.ReadCapacityUnits * 2
+		writeCapacity = meta.ProvisionedThroughput.WriteCapacityUnits
 	}
 	readLimiter := rate.NewLimiter(rate.Limit(readCapacity), readCapacity)
 	writeLimiter := rate.NewLimiter(rate.Limit(writeCapacity), writeCapacity)
@@ -227,67 +290,69 @@ func (s *InnerStorage) getTuple(primaryKey []byte, tableName string, txn *sql.Tx
 
 func (s *InnerStorage) syncGlobalSecondaryIndices(primaryKey *PrimaryKey, entry *EntryWrapper, txn *sql.Tx, table *InnerTableMetadata) error {
 	for _, gsi := range table.GlobalSecondaryIndexSettings {
-		// TODO: refactor it
-		tableName := gsi.IndexTableName
-		tuple, err := s.getTuple(primaryKey.Bytes(), tableName, txn)
+		if err := s.syncSingleGSI(primaryKey, entry, txn, table, gsi); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *InnerStorage) syncSingleGSI(primaryKey *PrimaryKey, entry *EntryWrapper, txn *sql.Tx, table *InnerTableMetadata, gsi InnerTableGlobalSecondaryIndexSetting) error {
+	tableName := gsi.IndexTableName
+	tuple, err := s.getTuple(primaryKey.Bytes(), tableName, txn)
+	if err != nil {
+		return err
+	}
+
+	var gsiPartitionKey []byte
+	if _, ok := entry.Entry.Body[*gsi.PartitionKeyName]; ok {
+		gsiPartitionKey = entry.Entry.Body[*gsi.PartitionKeyName].Bytes()
+	}
+	var gsiSortKey []byte
+	if gsi.SortKeyName != nil {
+		if _, ok := entry.Entry.Body[*gsi.SortKeyName]; ok {
+			gsiSortKey = entry.Entry.Body[*gsi.SortKeyName].Bytes()
+		}
+	}
+
+	gsiEntry := s.newGsiEntry(entry, gsi, table)
+
+	if tuple == nil {
+		stmt, err := txn.Prepare("insert into " + tableName + "(primary_key, body, main_partition_key, main_sort_key, partition_key, sort_key, shard_id) values(?, ?, ?, ?, ?, ?, ?)")
+		if err != nil {
+			return err
+		}
+		defer stmt.Close()
+
+		tuple = &Tuple{
+			Entries: make([]EntryWrapper, 0),
+		}
+		tuple.addEntry(gsiEntry)
+		body, err := json.Marshal(&tuple)
 		if err != nil {
 			return err
 		}
 
-		var gsiPartitionKey []byte
-		if _, ok := entry.Entry.Body[*gsi.PartitionKeyName]; ok {
-			gsiPartitionKey = entry.Entry.Body[*gsi.PartitionKeyName].Bytes()
+		_, err = stmt.Exec(primaryKey.Bytes(), body, primaryKey.PartitionKey, primaryKey.SortKey, gsiPartitionKey, gsiSortKey, buildShardId(gsiPartitionKey))
+		if err != nil {
+			return err
 		}
-		var gsiSortKey []byte
-		if gsi.SortKeyName != nil {
-			if _, ok := entry.Entry.Body[*gsi.SortKeyName]; ok {
-				gsiSortKey = entry.Entry.Body[*gsi.SortKeyName].Bytes()
-			}
+	} else {
+		stmt, err := txn.Prepare("update " + tableName + " set body = ?, partition_key = ?, sort_key = ?, shard_id = ? where primary_key = ?")
+		if err != nil {
+			return err
 		}
+		defer stmt.Close()
 
-		gsiEntry := s.newGsiEntry(entry, gsi, table)
-
-		if tuple == nil {
-
-			stmt, err := txn.Prepare("insert into " + tableName + "(primary_key, body, main_partition_key, main_sort_key, partition_key, sort_key, shard_id) values(?, ?, ?, ?, ?, ?, ?)")
-
-			tuple = &Tuple{
-				Entries: make([]EntryWrapper, 0),
-			}
-			tuple.addEntry(gsiEntry)
-			body, err := json.Marshal(&tuple)
-			if err != nil {
-				return err
-			}
-
-			_, err = stmt.Exec(primaryKey.Bytes(), body, primaryKey.PartitionKey, primaryKey.SortKey, gsiPartitionKey, gsiSortKey, buildShardId(gsiPartitionKey))
-			if err != nil {
-				return err
-			}
-
-			err = stmt.Close()
-			if err != nil {
-				return err
-			}
-		} else {
-			stmt, err := txn.Prepare("update " + tableName + " set body = ?, partition_key = ?, sort_key = ?, shard_id = ? where primary_key = ?")
-
-			tuple.addEntry(gsiEntry)
-			body, err := json.Marshal(&tuple)
-			if err != nil {
-				return err
-			}
-			_, err = stmt.Exec(body, gsiPartitionKey, gsiSortKey, buildShardId(gsiPartitionKey), primaryKey.Bytes())
-			if err != nil {
-				return err
-			}
-
-			err = stmt.Close()
-			if err != nil {
-				return err
-			}
+		tuple.addEntry(gsiEntry)
+		body, err := json.Marshal(&tuple)
+		if err != nil {
+			return err
 		}
-
+		_, err = stmt.Exec(body, gsiPartitionKey, gsiSortKey, buildShardId(gsiPartitionKey), primaryKey.Bytes())
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -328,4 +393,214 @@ func (s *InnerStorage) newGsiEntry(entry *EntryWrapper, gsi InnerTableGlobalSeco
 	}
 
 	return &EntryWrapper{Entry: gsiEntry, IsDeleted: false, CreatedAt: entry.CreatedAt}
+}
+
+type GSIOperation struct {
+	Type         string // "CREATE", "UPDATE", "DELETE"
+	GSIName      string
+	CreateAction *CreateGSIAction
+	UpdateAction *UpdateGSIAction
+	DeleteAction *DeleteGSIAction
+}
+
+type CreateGSIAction struct {
+	IndexName             *string
+	KeySchema             []core.KeySchema
+	Projection            *Projection
+	PartitionKeyName      *string
+	SortKeyName           *string
+	NonKeyAttributes      []string
+	ProjectionType        core.ProjectionType
+	ProvisionedThroughput *core.ProvisionedThroughput
+}
+
+type UpdateGSIAction struct {
+	ProvisionedThroughput *core.ProvisionedThroughput
+}
+
+type DeleteGSIAction struct {
+	// No additional data needed for delete
+}
+
+type Projection struct {
+	ProjectionType   core.ProjectionType
+	NonKeyAttributes []string
+}
+
+func (s *InnerStorage) RunGSIUpdates(tableName string, operations []GSIOperation) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	tableMetadata, exists := s.TableMetaDatas[tableName]
+	if !exists {
+		return fmt.Errorf("table %s not found", tableName)
+	}
+
+	// Clone metadata for atomic updates - rollback on failure
+	clonedMetadata := tableMetadata.Clone()
+
+	// Begin transaction for atomic operation
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Execute all operations in the transaction using the cloned metadata
+	for _, op := range operations {
+		switch op.Type {
+		case "CREATE":
+			if err := s.executeGSICreateInTx(tx, clonedMetadata, op.GSIName, op.CreateAction); err != nil {
+				return fmt.Errorf("failed to create GSI %s: %w", op.GSIName, err)
+			}
+		case "UPDATE":
+			if err := s.executeGSIUpdateInTx(tx, clonedMetadata, op.GSIName, op.UpdateAction); err != nil {
+				return fmt.Errorf("failed to update GSI %s: %w", op.GSIName, err)
+			}
+		case "DELETE":
+			if err := s.executeGSIDeleteInTx(tx, clonedMetadata, op.GSIName, op.DeleteAction); err != nil {
+				return fmt.Errorf("failed to delete GSI %s: %w", op.GSIName, err)
+			}
+		default:
+			return fmt.Errorf("unknown GSI operation type: %s", op.Type)
+		}
+	}
+
+	// Commit transaction - all operations succeed or all fail
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit GSI updates transaction: %w", err)
+	}
+
+	// Only update the actual metadata after successful commit
+	s.TableMetaDatas[tableName] = clonedMetadata
+
+	return nil
+}
+
+func (s *InnerStorage) executeGSICreateInTx(tx *sql.Tx, tableMetadata *InnerTableMetadata, gsiName string, action *CreateGSIAction) error {
+	// Generate unique GSI table name
+	gsiTableName := s.newGsiTableName()
+
+	// Create GSI table with same schema as during table creation
+	createTableSQL := `
+		create table ` + gsiTableName + ` (primary_key blob not null primary key, body blob, main_partition_key blob, main_sort_key blob, partition_key blob, sort_key blob, shard_id integer);
+		create index idx_` + gsiTableName + `_partition_key_sort_key on ` + gsiTableName + `(partition_key, sort_key);
+	`
+
+	if _, err := tx.Exec(createTableSQL); err != nil {
+		return fmt.Errorf("failed to create GSI table %s: %w", gsiTableName, err)
+	}
+
+	// Set up rate limiter (default to no rate limiting for PAY_PER_REQUEST)
+	var readLimiter *rate.Limiter
+	if action.ProvisionedThroughput != nil {
+		readCapacity := action.ProvisionedThroughput.ReadCapacityUnits * 2
+		readLimiter = rate.NewLimiter(rate.Limit(readCapacity), readCapacity)
+	}
+
+	// Add to metadata
+	tableMetadata.GlobalSecondaryIndexSettings[gsiName] = InnerTableGlobalSecondaryIndexSetting{
+		IndexTableName:   gsiTableName,
+		PartitionKeyName: action.PartitionKeyName,
+		SortKeyName:      action.SortKeyName,
+		NonKeyAttributes: action.NonKeyAttributes,
+		ProjectionType:   action.ProjectionType,
+		readRateLimiter:  readLimiter,
+	}
+
+	// Backfill existing data from main table to GSI
+	if err := s.backfillGSIData(tx, tableMetadata, gsiName); err != nil {
+		return fmt.Errorf("failed to backfill GSI data: %w", err)
+	}
+
+	return nil
+}
+
+func (s *InnerStorage) executeGSIUpdateInTx(tx *sql.Tx, tableMetadata *InnerTableMetadata, gsiName string, action *UpdateGSIAction) error {
+	gsiSetting, exists := tableMetadata.GlobalSecondaryIndexSettings[gsiName]
+	if !exists {
+		return fmt.Errorf("GSI %s not found", gsiName)
+	}
+
+	// Update rate limiter based on throughput settings
+	if action.ProvisionedThroughput != nil {
+		// PROVISIONED mode - set rate limiter
+		readCapacity := action.ProvisionedThroughput.ReadCapacityUnits * 2
+		gsiSetting.readRateLimiter = rate.NewLimiter(rate.Limit(readCapacity), readCapacity)
+	} else {
+		// PAY_PER_REQUEST mode - disable rate limiting
+		gsiSetting.readRateLimiter = nil
+	}
+
+	// Update metadata (in memory, committed with transaction)
+	tableMetadata.GlobalSecondaryIndexSettings[gsiName] = gsiSetting
+
+	// Note: No database schema changes needed for GSI throughput updates
+	// The throughput settings are only stored in memory for rate limiting
+
+	return nil
+}
+
+func (s *InnerStorage) executeGSIDeleteInTx(tx *sql.Tx, tableMetadata *InnerTableMetadata, gsiName string, action *DeleteGSIAction) error {
+	gsiSetting, exists := tableMetadata.GlobalSecondaryIndexSettings[gsiName]
+	if !exists {
+		return fmt.Errorf("GSI %s not found", gsiName)
+	}
+
+	// Drop the GSI table
+	dropTableSQL := fmt.Sprintf("DROP TABLE IF EXISTS %s", gsiSetting.IndexTableName)
+	if _, err := tx.Exec(dropTableSQL); err != nil {
+		return fmt.Errorf("failed to drop GSI table %s: %w", gsiSetting.IndexTableName, err)
+	}
+
+	delete(tableMetadata.GlobalSecondaryIndexSettings, gsiName)
+
+	return nil
+}
+
+func (s *InnerStorage) backfillGSIData(tx *sql.Tx, tableMetadata *InnerTableMetadata, gsiName string) error {
+	// Get the GSI settings
+	gsiSetting, exists := tableMetadata.GlobalSecondaryIndexSettings[gsiName]
+	if !exists {
+		return fmt.Errorf("GSI %s not found in metadata", gsiName)
+	}
+
+	// Query all existing entries from the main table using the logical table name
+	query := fmt.Sprintf("SELECT partition_key, sort_key, body FROM %s", tableMetadata.Name)
+	rows, err := tx.Query(query)
+	if err != nil {
+		return fmt.Errorf("failed to query main table for backfill: %w", err)
+	}
+	defer rows.Close()
+
+	// Process each existing entry
+	for rows.Next() {
+		var partitionKey []byte
+		var sortKey []byte
+		var bodyBytes []byte
+
+		if err := rows.Scan(&partitionKey, &sortKey, &bodyBytes); err != nil {
+			return fmt.Errorf("failed to scan main table row: %w", err)
+		}
+
+		var tuple Tuple
+		if err := json.Unmarshal(bodyBytes, &tuple); err != nil {
+			return fmt.Errorf("failed to unmarshal tuple: %w", err)
+		}
+
+		// Reconstruct primary key
+		primaryKey := &PrimaryKey{
+			PartitionKey: partitionKey,
+			SortKey:      sortKey,
+		}
+
+		// For each entry in the tuple, sync to the new GSI
+		for _, entryWrapper := range tuple.Entries {
+			if err := s.syncSingleGSI(primaryKey, &entryWrapper, tx, tableMetadata, gsiSetting); err != nil {
+				return fmt.Errorf("failed to sync entry to GSI: %w", err)
+			}
+		}
+	}
+
+	return rows.Err()
 }

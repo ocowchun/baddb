@@ -193,18 +193,23 @@ func (svc *Service) CreateTable(ctx context.Context, input *dynamodb.CreateTable
 		}
 	}
 
+	provisionedThroughput, err := core.BuildProvisionedThroughput(input.ProvisionedThroughput)
+	if err != nil {
+		return nil, &ValidationException{Message: err.Error()}
+	}
+
 	meta := &core.TableMetaData{
 		AttributeDefinitions:         input.AttributeDefinitions,
 		GlobalSecondaryIndexSettings: gsiSettings,
 		LocalSecondaryIndexes:        input.LocalSecondaryIndexes,
-		ProvisionedThroughput:        input.ProvisionedThroughput,
+		ProvisionedThroughput:        provisionedThroughput,
 		CreationDateTime:             &now,
 		PartitionKeySchema:           partitionKeySchema,
 		SortKeySchema:                sortKeySchema,
 		Name:                         tableName,
 		BillingMode:                  billingMode,
 	}
-	err := svc.storage.CreateTable(meta)
+	err = svc.storage.CreateTable(meta)
 	if err != nil {
 		return nil, err
 	}
@@ -714,32 +719,21 @@ func (svc *Service) UpdateTable(ctx context.Context, input *dynamodb.UpdateTable
 			}
 			return nil, err
 		}
-		if input.ProvisionedThroughput.ReadCapacityUnits != nil && *input.ProvisionedThroughput.ReadCapacityUnits < 1 {
-			svc.tableMetadataStore[tableName] = originalTable
-			msg := "Read capacity units must be greater than 0"
-			err := &ValidationException{
-				Message: msg,
-			}
-			return nil, err
+
+		provisionedThroughput, err := core.BuildProvisionedThroughput(input.ProvisionedThroughput)
+		if err != nil {
+			return nil, &ValidationException{Message: err.Error()}
 		}
-		if input.ProvisionedThroughput.WriteCapacityUnits != nil && *input.ProvisionedThroughput.WriteCapacityUnits < 1 {
-			svc.tableMetadataStore[tableName] = originalTable
-			msg := "Write capacity units must be greater than 0"
-			err := &ValidationException{
-				Message: msg,
-			}
-			return nil, err
-		}
-		table.ProvisionedThroughput = input.ProvisionedThroughput
+
+		table.ProvisionedThroughput = provisionedThroughput
 	}
 
 	if len(input.GlobalSecondaryIndexUpdates) > 0 {
-		svc.tableMetadataStore[tableName] = originalTable
-		msg := "GlobalSecondaryIndex updates are not supported"
-		err := &ValidationException{
-			Message: msg,
+		err := svc.processGSIUpdates(table, input.GlobalSecondaryIndexUpdates)
+		if err != nil {
+			svc.tableMetadataStore[tableName] = originalTable
+			return nil, err
 		}
-		return nil, err
 	}
 
 	itemCount, err := svc.storage.QueryItemCount(tableName)
@@ -754,6 +748,383 @@ func (svc *Service) UpdateTable(ctx context.Context, input *dynamodb.UpdateTable
 	}
 
 	return output, nil
+}
+
+func (svc *Service) processGSIUpdates(table *core.TableMetaData, updates []types.GlobalSecondaryIndexUpdate) error {
+	// Phase 1: Validate ALL operations first (fail fast)
+	for _, update := range updates {
+		if update.Create != nil {
+			if err := svc.validateGSICreate(table, update.Create); err != nil {
+				return err
+			}
+		}
+		if update.Update != nil {
+			if err := svc.validateGSIUpdate(table, update.Update); err != nil {
+				return err
+			}
+		}
+		if update.Delete != nil {
+			if err := svc.validateGSIDelete(table, update.Delete); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Phase 2: Update metadata first (fail fast - cheaper operation)
+	for _, update := range updates {
+		if update.Create != nil {
+			if err := svc.addGSIToTableMetadata(table, update.Create); err != nil {
+				return err
+			}
+		}
+		if update.Update != nil {
+			if err := svc.updateGSIInTableMetadata(table, update.Update); err != nil {
+				return err
+			}
+		}
+		if update.Delete != nil {
+			if err := svc.removeGSIFromTableMetadata(table, update.Delete); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Phase 3: Execute all storage operations atomically (expensive operation)
+	storageOperations := make([]storage.GSIOperation, 0, len(updates))
+
+	for _, update := range updates {
+		if update.Create != nil {
+			op := storage.GSIOperation{
+				Type:         "CREATE",
+				GSIName:      *update.Create.IndexName,
+				CreateAction: svc.convertToStorageCreateAction(update.Create),
+			}
+			storageOperations = append(storageOperations, op)
+		}
+		if update.Update != nil {
+			var provisionedThroughput *core.ProvisionedThroughput
+			if update.Update.ProvisionedThroughput != nil {
+				pt, err := core.BuildProvisionedThroughput(update.Update.ProvisionedThroughput)
+				if err != nil {
+					return err
+				}
+				provisionedThroughput = pt
+			}
+			
+			op := storage.GSIOperation{
+				Type:    "UPDATE",
+				GSIName: *update.Update.IndexName,
+				UpdateAction: &storage.UpdateGSIAction{
+					ProvisionedThroughput: provisionedThroughput,
+				},
+			}
+			storageOperations = append(storageOperations, op)
+		}
+		if update.Delete != nil {
+			op := storage.GSIOperation{
+				Type:         "DELETE",
+				GSIName:      *update.Delete.IndexName,
+				DeleteAction: &storage.DeleteGSIAction{},
+			}
+			storageOperations = append(storageOperations, op)
+		}
+	}
+
+	// Execute all operations atomically in storage
+	if err := svc.storage.RunGSIUpdates(table.Name, storageOperations); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (svc *Service) validateGSICreate(table *core.TableMetaData, create *types.CreateGlobalSecondaryIndexAction) error {
+	if create.IndexName == nil || *create.IndexName == "" {
+		return &ValidationException{Message: "Index name is required"}
+	}
+
+	// For CREATE: GSI must NOT exist
+	if svc.gsiExists(table, create.IndexName) {
+		return &ValidationException{Message: "Global Secondary Index already exists"}
+	}
+
+	if err := svc.validateGSIKeySchema(table, create.KeySchema); err != nil {
+		return err
+	}
+
+	if err := svc.validateGSIProjection(table, create.Projection); err != nil {
+		return err
+	}
+	if table.BillingMode == core.BILLING_MODE_PROVISIONED && create.ProvisionedThroughput == nil {
+		return &ValidationException{Message: "ProvisionedThroughput is required when BillingMode is PROVISIONED"}
+	}
+
+	return nil
+}
+
+func (svc *Service) validateGSIUpdate(table *core.TableMetaData, update *types.UpdateGlobalSecondaryIndexAction) error {
+	if update.IndexName == nil || *update.IndexName == "" {
+		return &ValidationException{Message: "Index name is required"}
+	}
+
+	// For UPDATE: GSI must exist
+	if !svc.gsiExists(table, update.IndexName) {
+		return &ValidationException{Message: "Global Secondary Index not found"}
+	}
+
+	// GSI updates are limited to throughput settings only
+	if table.BillingMode == core.BILLING_MODE_PROVISIONED && update.ProvisionedThroughput == nil {
+		return &ValidationException{Message: "ProvisionedThroughput is required when BillingMode is PROVISIONED"}
+	}
+	if update.ProvisionedThroughput != nil {
+		if err := svc.validateProvisionedThroughput(update.ProvisionedThroughput); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (svc *Service) validateGSIDelete(table *core.TableMetaData, delete *types.DeleteGlobalSecondaryIndexAction) error {
+	if delete.IndexName == nil || *delete.IndexName == "" {
+		return &ValidationException{Message: "Index name is required"}
+	}
+
+	// For DELETE: GSI must exist
+	if !svc.gsiExists(table, delete.IndexName) {
+		return &ValidationException{Message: "Global Secondary Index not found"}
+	}
+
+	return nil
+}
+
+func (svc *Service) gsiExists(table *core.TableMetaData, indexName *string) bool {
+	if indexName == nil {
+		return false
+	}
+
+	for _, existingGSI := range table.GlobalSecondaryIndexSettings {
+		if existingGSI.IndexName != nil && *existingGSI.IndexName == *indexName {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (svc *Service) validateGSIKeySchema(table *core.TableMetaData, keySchema []types.KeySchemaElement) error {
+	if len(keySchema) == 0 {
+		return &ValidationException{Message: "KeySchema is required for Global Secondary Index"}
+	}
+
+	var hasPartitionKey bool
+	var hasSortKey bool
+	attributeDefinitionMap := make(map[string]types.AttributeDefinition)
+
+	// Build attribute definition map for lookup
+	for _, attrDef := range table.AttributeDefinitions {
+		attributeDefinitionMap[*attrDef.AttributeName] = attrDef
+	}
+
+	for _, element := range keySchema {
+		if element.AttributeName == nil {
+			return &ValidationException{Message: "Attribute name is required in KeySchema"}
+		}
+
+		// Check attribute exists in table definition
+		if _, exists := attributeDefinitionMap[*element.AttributeName]; !exists {
+			return &ValidationException{Message: "Attribute not found in table attribute definitions"}
+		}
+
+		// Validate key types
+		switch element.KeyType {
+		case types.KeyTypeHash:
+			if hasPartitionKey {
+				return &ValidationException{Message: "Multiple partition keys not allowed"}
+			}
+			hasPartitionKey = true
+		case types.KeyTypeRange:
+			if hasSortKey {
+				return &ValidationException{Message: "Multiple sort keys not allowed"}
+			}
+			hasSortKey = true
+		default:
+			return &ValidationException{Message: "Invalid key type"}
+		}
+	}
+
+	if !hasPartitionKey {
+		return &ValidationException{Message: "Partition key is required for Global Secondary Index"}
+	}
+
+	return nil
+}
+
+func (svc *Service) validateGSIProjection(table *core.TableMetaData, projection *types.Projection) error {
+	if projection == nil {
+		return nil // Projection is optional, defaults to ALL
+	}
+
+	switch projection.ProjectionType {
+	case types.ProjectionTypeAll:
+		// No additional validation needed
+	case types.ProjectionTypeKeysOnly:
+		if len(projection.NonKeyAttributes) > 0 {
+			return &ValidationException{Message: "NonKeyAttributes not allowed with KEYS_ONLY projection"}
+		}
+	case types.ProjectionTypeInclude:
+		if len(projection.NonKeyAttributes) == 0 {
+			return &ValidationException{Message: "NonKeyAttributes required with INCLUDE projection"}
+		}
+
+		// Validate that NonKeyAttributes exist in table
+		attributeDefinitionMap := make(map[string]bool)
+		for _, attrDef := range table.AttributeDefinitions {
+			attributeDefinitionMap[*attrDef.AttributeName] = true
+		}
+
+		for _, attr := range projection.NonKeyAttributes {
+			if !attributeDefinitionMap[attr] {
+				return &ValidationException{Message: "NonKeyAttribute not found in table attribute definitions"}
+			}
+		}
+	default:
+		return &ValidationException{Message: "Invalid projection type"}
+	}
+
+	return nil
+}
+
+func (svc *Service) validateProvisionedThroughput(throughput *types.ProvisionedThroughput) error {
+	if throughput.ReadCapacityUnits != nil && *throughput.ReadCapacityUnits < 1 {
+		return &ValidationException{Message: "Read capacity units must be greater than 0"}
+	}
+	if throughput.WriteCapacityUnits != nil && *throughput.WriteCapacityUnits < 1 {
+		return &ValidationException{Message: "Write capacity units must be greater than 0"}
+	}
+	return nil
+}
+
+func (svc *Service) addGSIToTableMetadata(table *core.TableMetaData, create *types.CreateGlobalSecondaryIndexAction) error {
+	var attributeDefinitionMap = make(map[string]types.AttributeDefinition)
+	for _, attrDef := range table.AttributeDefinitions {
+		attributeDefinitionMap[*attrDef.AttributeName] = attrDef
+	}
+
+	var partitionKeySchema *core.KeySchema
+	var sortKeySchema *core.KeySchema
+
+	for _, keySchema := range create.KeySchema {
+		def, ok := attributeDefinitionMap[*keySchema.AttributeName]
+		if !ok {
+			return &ValidationException{Message: "Attribute not found in table attribute definitions"}
+		}
+		attrType, err := core.GetScalarAttributeType(def)
+		if err != nil {
+			return &ValidationException{Message: err.Error()}
+		}
+
+		if keySchema.KeyType == types.KeyTypeHash {
+			partitionKeySchema = &core.KeySchema{
+				AttributeName: *keySchema.AttributeName,
+				AttributeType: attrType,
+			}
+		} else if keySchema.KeyType == types.KeyTypeRange {
+			sortKeySchema = &core.KeySchema{
+				AttributeName: *keySchema.AttributeName,
+				AttributeType: attrType,
+			}
+		}
+	}
+
+	projectionType := core.PROJECTION_TYPE_ALL
+	if create.Projection != nil {
+		switch create.Projection.ProjectionType {
+		case types.ProjectionTypeKeysOnly:
+			projectionType = core.PROJECTION_TYPE_KEYS_ONLY
+		case types.ProjectionTypeInclude:
+			projectionType = core.PROJECTION_TYPE_INCLUDE
+		case types.ProjectionTypeAll:
+			projectionType = core.PROJECTION_TYPE_ALL
+		}
+	}
+
+	gsiSetting := core.GlobalSecondaryIndexSetting{
+		IndexName:          create.IndexName,
+		PartitionKeySchema: partitionKeySchema,
+		SortKeySchema:      sortKeySchema,
+		ProjectionType:     projectionType,
+	}
+
+	if create.Projection != nil && len(create.Projection.NonKeyAttributes) > 0 {
+		gsiSetting.NonKeyAttributes = create.Projection.NonKeyAttributes
+	}
+
+	table.GlobalSecondaryIndexSettings = append(table.GlobalSecondaryIndexSettings, gsiSetting)
+	return nil
+}
+
+func (svc *Service) updateGSIInTableMetadata(table *core.TableMetaData, update *types.UpdateGlobalSecondaryIndexAction) error {
+	for i, gsi := range table.GlobalSecondaryIndexSettings {
+		if gsi.IndexName != nil && *gsi.IndexName == *update.IndexName {
+			if update.ProvisionedThroughput != nil {
+				pt, err := core.BuildProvisionedThroughput(update.ProvisionedThroughput)
+				if err != nil {
+					return &ValidationException{Message: err.Error()}
+				}
+				table.GlobalSecondaryIndexSettings[i].ProvisionedThroughput = pt
+			} else {
+				table.GlobalSecondaryIndexSettings[i].ProvisionedThroughput = nil
+			}
+			return nil
+		}
+	}
+	return &ValidationException{Message: "Global Secondary Index not found"}
+}
+
+func (svc *Service) removeGSIFromTableMetadata(table *core.TableMetaData, delete *types.DeleteGlobalSecondaryIndexAction) error {
+	for i, gsi := range table.GlobalSecondaryIndexSettings {
+		if gsi.IndexName != nil && *gsi.IndexName == *delete.IndexName {
+			table.GlobalSecondaryIndexSettings = append(
+				table.GlobalSecondaryIndexSettings[:i],
+				table.GlobalSecondaryIndexSettings[i+1:]...,
+			)
+			return nil
+		}
+	}
+	return &ValidationException{Message: "Global Secondary Index not found"}
+}
+
+func (svc *Service) convertToStorageCreateAction(create *types.CreateGlobalSecondaryIndexAction) *storage.CreateGSIAction {
+	action := &storage.CreateGSIAction{
+		IndexName: create.IndexName,
+	}
+
+	// Convert KeySchema
+	for _, keySchema := range create.KeySchema {
+		if keySchema.KeyType == types.KeyTypeHash {
+			action.PartitionKeyName = keySchema.AttributeName
+		} else if keySchema.KeyType == types.KeyTypeRange {
+			action.SortKeyName = keySchema.AttributeName
+		}
+	}
+
+	// Convert Projection
+	if create.Projection != nil {
+		switch create.Projection.ProjectionType {
+		case types.ProjectionTypeKeysOnly:
+			action.ProjectionType = core.PROJECTION_TYPE_KEYS_ONLY
+		case types.ProjectionTypeInclude:
+			action.ProjectionType = core.PROJECTION_TYPE_INCLUDE
+			action.NonKeyAttributes = create.Projection.NonKeyAttributes
+		case types.ProjectionTypeAll:
+			action.ProjectionType = core.PROJECTION_TYPE_ALL
+		}
+	} else {
+		action.ProjectionType = core.PROJECTION_TYPE_ALL
+	}
+
+	return action
 }
 
 func (svc *Service) DeleteTable(ctx context.Context, input *dynamodb.DeleteTableInput) (*dynamodb.DeleteTableOutput, error) {

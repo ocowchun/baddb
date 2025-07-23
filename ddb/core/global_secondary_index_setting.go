@@ -1,11 +1,12 @@
 package core
 
 type GlobalSecondaryIndexSetting struct {
-	IndexName          *string
-	PartitionKeySchema *KeySchema
-	SortKeySchema      *KeySchema
-	NonKeyAttributes   []string
-	ProjectionType     ProjectionType
+	IndexName             *string
+	PartitionKeySchema    *KeySchema
+	SortKeySchema         *KeySchema
+	NonKeyAttributes      []string
+	ProjectionType        ProjectionType
+	ProvisionedThroughput *ProvisionedThroughput
 }
 
 func (gsi GlobalSecondaryIndexSetting) PartitionKeyName() *string {

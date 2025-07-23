@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"time"
 )
@@ -10,13 +11,39 @@ type KeySchema struct {
 	AttributeType ScalarAttributeType
 }
 
+type ProvisionedThroughput struct {
+	ReadCapacityUnits  int
+	WriteCapacityUnits int
+}
+
+func BuildProvisionedThroughput(provisionedThroughput *types.ProvisionedThroughput) (*ProvisionedThroughput, error) {
+	if provisionedThroughput == nil {
+		return nil, nil
+	}
+
+	if provisionedThroughput.ReadCapacityUnits != nil && *provisionedThroughput.ReadCapacityUnits < 1 {
+		msg := "Read capacity units must be greater than 0"
+		return nil, errors.New(msg)
+	}
+	if provisionedThroughput.WriteCapacityUnits != nil && *provisionedThroughput.WriteCapacityUnits < 1 {
+		msg := "Write capacity units must be greater than 0"
+		return nil, errors.New(msg)
+	}
+
+	res := ProvisionedThroughput{
+		ReadCapacityUnits:  int(*provisionedThroughput.ReadCapacityUnits),
+		WriteCapacityUnits: int(*provisionedThroughput.WriteCapacityUnits),
+	}
+	return &res, nil
+}
+
 type TableMetaData struct {
 	Name                         string
 	AttributeDefinitions         []types.AttributeDefinition
 	KeySchema                    []types.KeySchemaElement
 	GlobalSecondaryIndexSettings []GlobalSecondaryIndexSetting
 	LocalSecondaryIndexes        []types.LocalSecondaryIndex
-	ProvisionedThroughput        *types.ProvisionedThroughput
+	ProvisionedThroughput        *ProvisionedThroughput
 	CreationDateTime             *time.Time
 	PartitionKeySchema           *KeySchema
 	SortKeySchema                *KeySchema
@@ -105,7 +132,7 @@ func (m *TableMetaData) Clone() *TableMetaData {
 	}
 
 	if m.ProvisionedThroughput != nil {
-		clone.ProvisionedThroughput = &types.ProvisionedThroughput{
+		clone.ProvisionedThroughput = &ProvisionedThroughput{
 			ReadCapacityUnits:  m.ProvisionedThroughput.ReadCapacityUnits,
 			WriteCapacityUnits: m.ProvisionedThroughput.WriteCapacityUnits,
 		}
@@ -192,8 +219,8 @@ func (m *TableMetaData) Description(itemCount int64) *types.TableDescription {
 	readCapacityUnits := int64(0)
 	writeCapacityUnits := int64(0)
 	if m.ProvisionedThroughput != nil {
-		readCapacityUnits = *m.ProvisionedThroughput.ReadCapacityUnits
-		writeCapacityUnits = *m.ProvisionedThroughput.WriteCapacityUnits
+		readCapacityUnits = int64((*m.ProvisionedThroughput).ReadCapacityUnits)
+		writeCapacityUnits = int64((*m.ProvisionedThroughput).WriteCapacityUnits)
 	}
 	provisionedThroughput := &types.ProvisionedThroughputDescription{
 		ReadCapacityUnits:  &readCapacityUnits,

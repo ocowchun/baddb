@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/ocowchun/baddb/ddb/condition"
 	"github.com/ocowchun/baddb/ddb/core"
 	"github.com/ocowchun/baddb/ddb/query"
@@ -23,8 +22,8 @@ func createTestInnerStorageWithGSI(gsiSettings []core.GlobalSecondaryIndexSettin
 }
 
 func createTestInnerStorage(
-	ReadCapacityUnits int64,
-	WriteCapacityUnits int64,
+	ReadCapacityUnits int,
+	WriteCapacityUnits int,
 	mode core.BillingMode,
 	gsiSettings []core.GlobalSecondaryIndexSetting,
 ) *InnerStorage {
@@ -39,9 +38,9 @@ func createTestInnerStorage(
 			AttributeName: "sortKey",
 		},
 		BillingMode: mode,
-		ProvisionedThroughput: &types.ProvisionedThroughput{
-			ReadCapacityUnits:  &ReadCapacityUnits,
-			WriteCapacityUnits: &WriteCapacityUnits,
+		ProvisionedThroughput: &core.ProvisionedThroughput{
+			ReadCapacityUnits:  ReadCapacityUnits,
+			WriteCapacityUnits: WriteCapacityUnits,
 		},
 	}
 	err := storage.CreateTable(tableMetaData)
