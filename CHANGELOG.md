@@ -1,3 +1,6 @@
+## 0.2.7 / 2025-07-23
+* Support `UpdateTable` 
+
 ## 0.2.6 / 2025-06-24
 * Fix `attribute_type` condition
 * Add more test cases
