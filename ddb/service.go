@@ -421,11 +421,7 @@ func (svc *Service) PutItem(ctx context.Context, input *dynamodb.PutItemInput) (
 		}
 		err = svc.storage.Put(req)
 		if err != nil {
-			if errors.Is(err, storage.RateLimitReachedError) {
-				return nil, ProvisionedThroughputExceededException
-
-			}
-			return nil, err
+			return nil, wrapError(err)
 		}
 
 		//TODO: configure PutItemOutput
@@ -463,7 +459,7 @@ func (svc *Service) UpdateItem(ctx context.Context, input *dynamodb.UpdateItemIn
 
 		res, err := svc.storage.Update(req)
 		if err != nil {
-			return nil, err
+			return nil, wrapError(err)
 		}
 
 		// TODO: consider ReturnValues
@@ -504,7 +500,7 @@ func (svc *Service) DeleteItem(ctx context.Context, input *dynamodb.DeleteItemIn
 
 		err = svc.storage.Delete(req)
 		if err != nil {
-			return nil, err
+			return nil, wrapError(err)
 		}
 		output := &dynamodb.DeleteItemOutput{}
 
@@ -538,7 +534,7 @@ func (svc *Service) GetItem(ctx context.Context, input *dynamodb.GetItemInput) (
 		entry, err := svc.storage.Get(req)
 
 		if err != nil {
-			return nil, err
+			return nil, wrapError(err)
 		}
 		if entry == nil {
 			output := dynamodb.GetItemOutput{
@@ -635,7 +631,7 @@ func (svc *Service) Query(ctx context.Context, input *dynamodb.QueryInput) (*dyn
 
 	res, err := svc.storage.Query(queryReq)
 	if err != nil {
-		return nil, err
+		return nil, wrapError(err)
 	}
 	entries := res.Entries
 	items := make([]map[string]types.AttributeValue, len(entries))
@@ -1456,7 +1452,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 			} else if matched {
 				continue
 			} else {
-				return nil, buildTransactErr(err)
+				return nil, wrapTransactionError(err)
 			}
 
 		} else if writeItem.Put != nil {
@@ -1484,7 +1480,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 			}
 			err = svc.storage.PutWithTransaction(req, txn)
 			if err != nil {
-				return nil, buildTransactErr(err)
+				return nil, wrapTransactionError(err)
 			}
 		} else if writeItem.Delete != nil {
 			deleteReq := writeItem.Delete
@@ -1543,7 +1539,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 
 			_, err = svc.storage.UpdateWithTransaction(req, txn)
 			if err != nil {
-				return nil, buildTransactErr(err)
+				return nil, wrapTransactionError(err)
 			}
 		}
 
@@ -1558,7 +1554,7 @@ func (svc *Service) TransactWriteItems(ctx context.Context, input *dynamodb.Tran
 	return output, nil
 }
 
-func buildTransactErr(err error) error {
+func wrapTransactionError(err error) error {
 	var conditionalCheckFailedException *storage.ConditionalCheckFailedException
 	if errors.As(err, &conditionalCheckFailedException) {
 		return &TransactionCanceledException{
@@ -1571,6 +1567,14 @@ func buildTransactErr(err error) error {
 			},
 		}
 	} else if errors.Is(err, storage.RateLimitReachedError) {
+		return ProvisionedThroughputExceededException
+	} else {
+		return err
+	}
+}
+
+func wrapError(err error) error {
+	if errors.Is(err, storage.RateLimitReachedError) {
 		return ProvisionedThroughputExceededException
 	} else {
 		return err
@@ -1620,7 +1624,7 @@ func (svc *Service) Scan(ctx context.Context, input *dynamodb.ScanInput) (*dynam
 
 	res, err := svc.storage.Scan(scanReq)
 	if err != nil {
-		return nil, err
+		return nil, wrapError(err)
 	}
 
 	entries := res.Entries

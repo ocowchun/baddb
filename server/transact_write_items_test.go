@@ -19,7 +19,7 @@ func TestTransactWriteItems(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
-	_, err = putItem(ddb)
+	_, err = putItem(ddb, 2025, "Hello World", "your magic is mine", "1", "US")
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}

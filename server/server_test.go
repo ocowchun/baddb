@@ -12,7 +12,6 @@ import (
 	"log"
 	"net/http"
 	"sort"
-	"strings"
 	"testing"
 )
 
@@ -78,96 +77,6 @@ func TestCreateAndDeleteTable(t *testing.T) {
 	}
 }
 
-func TestPutAndGetAndDeleteItem(t *testing.T) {
-	shutdown := startServer()
-	defer shutdown()
-	ddb := newDdbClient()
-	_, err := createTable(ddb, 5, 5)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-
-	_, err = putItem(ddb)
-
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-
-	getItemInput := &dynamodb.GetItemInput{
-		Key: map[string]types.AttributeValue{
-			"year":  &types.AttributeValueMemberN{Value: "2025"},
-			"title": &types.AttributeValueMemberS{Value: "Hello World"},
-		},
-		TableName: aws.String("movie"),
-	}
-	getItemOutput, err := ddb.GetItem(context.Background(), getItemInput)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-	if len(getItemOutput.Item) != 0 {
-		t.Fatalf("Expected no items, got %v", len(getItemOutput.Item))
-	}
-
-	getItemInput = &dynamodb.GetItemInput{
-		Key: map[string]types.AttributeValue{
-			"year":  &types.AttributeValueMemberN{Value: "2025"},
-			"title": &types.AttributeValueMemberS{Value: "Hello World"},
-		},
-		TableName:      aws.String("movie"),
-		ConsistentRead: aws.Bool(true),
-	}
-	getItemOutput, err = ddb.GetItem(context.Background(), getItemInput)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-	if len(getItemOutput.Item) == 0 {
-		t.Fatalf("Expected items, got %v", len(getItemOutput.Item))
-	}
-
-	deleteItemInput := &dynamodb.DeleteItemInput{
-		Key: map[string]types.AttributeValue{
-			"year":  &types.AttributeValueMemberN{Value: "2025"},
-			"title": &types.AttributeValueMemberS{Value: "Hello World"},
-		},
-		TableName: aws.String("movie"),
-	}
-	_, err = ddb.DeleteItem(context.Background(), deleteItemInput)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-
-	getItemInput = &dynamodb.GetItemInput{
-		Key: map[string]types.AttributeValue{
-			"year":  &types.AttributeValueMemberN{Value: "2025"},
-			"title": &types.AttributeValueMemberS{Value: "Hello World"},
-		},
-		TableName:      aws.String("movie"),
-		ConsistentRead: aws.Bool(true),
-	}
-	getItemOutput, err = ddb.GetItem(context.Background(), getItemInput)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-	if len(getItemOutput.Item) != 0 {
-		t.Fatalf("Expected no item, got %v", len(getItemOutput.Item))
-	}
-
-	getItemInput = &dynamodb.GetItemInput{
-		Key: map[string]types.AttributeValue{
-			"year":  &types.AttributeValueMemberN{Value: "2025"},
-			"title": &types.AttributeValueMemberS{Value: "Hello World"},
-		},
-		TableName: aws.String("movie"),
-	}
-	getItemOutput, err = ddb.GetItem(context.Background(), getItemInput)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-	if len(getItemOutput.Item) == 0 {
-		t.Fatalf("Expected no items, got %v", len(getItemOutput.Item))
-	}
-}
-
 func TestBatchGetItem(t *testing.T) {
 	shutdown := startServer()
 	defer shutdown()
@@ -180,26 +89,11 @@ func TestBatchGetItem(t *testing.T) {
 	// Insert test data
 	items := make([]map[string]types.AttributeValue, 0)
 	for i := 0; i < 4; i++ {
-		putItemInput := &dynamodb.PutItemInput{
-			Item: map[string]types.AttributeValue{
-				"year":        &types.AttributeValueMemberN{Value: "2025"},
-				"title":       &types.AttributeValueMemberS{Value: fmt.Sprintf("Hello World %d", i)},
-				"regionCode":  &types.AttributeValueMemberS{Value: "1"},
-				"countryCode": &types.AttributeValueMemberS{Value: fmt.Sprintf("code%d", i)},
-			},
-			TableName: aws.String("movie"),
-		}
-		items = append(items, putItemInput.Item)
-
-		_, err := ddb.PutItem(context.Background(), putItemInput)
+		item, err := putItem(ddb, 2025, fmt.Sprintf("Hello World %d", i), "message", "1", fmt.Sprintf("code%d", i))
 		if err != nil {
 			t.Fatalf("Expected no error, got %v", err)
 		}
-		// workaround for the eventual consistency of the local dynamodb
-		_, err = ddb.PutItem(context.Background(), putItemInput)
-		if err != nil {
-			t.Fatalf("Expected no error, got %v", err)
-		}
+		items = append(items, item)
 	}
 
 	// Test
@@ -340,138 +234,6 @@ func TestBatchWriteItem(t *testing.T) {
 
 }
 
-func TestQueryWithGsi(t *testing.T) {
-	shutdown := startServer()
-	defer shutdown()
-	ddb := newDdbClient()
-	_, err := createTable(ddb, 5, 5)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-
-	// Insert test data
-	items := make([]map[string]types.AttributeValue, 0)
-	for i := 0; i < 4; i++ {
-		putItemInput := &dynamodb.PutItemInput{
-			Item: map[string]types.AttributeValue{
-				"year":        &types.AttributeValueMemberN{Value: "2025"},
-				"title":       &types.AttributeValueMemberS{Value: fmt.Sprintf("Hello World %d", i)},
-				"regionCode":  &types.AttributeValueMemberS{Value: "1"},
-				"countryCode": &types.AttributeValueMemberS{Value: fmt.Sprintf("code%d", i)},
-			},
-			TableName: aws.String("movie"),
-		}
-		items = append(items, putItemInput.Item)
-
-		_, err := ddb.PutItem(context.Background(), putItemInput)
-		if err != nil {
-			t.Fatalf("Expected no error, got %v", err)
-		}
-		// workaround for the eventual consistency of the local dynamodb
-		_, err = ddb.PutItem(context.Background(), putItemInput)
-		if err != nil {
-			t.Fatalf("Expected no error, got %v", err)
-		}
-	}
-
-	// Test query with ScanIndexForward true
-	{
-		queryInput := &dynamodb.QueryInput{
-			TableName:              aws.String("movie"),
-			KeyConditionExpression: aws.String("regionCode = :regionCode"),
-			ExpressionAttributeValues: map[string]types.AttributeValue{
-				":regionCode": &types.AttributeValueMemberS{Value: "1"},
-			},
-			ScanIndexForward: aws.Bool(true),
-			Limit:            aws.Int32(2),
-			IndexName:        aws.String("regionGSI"),
-		}
-		queryOutput, err := ddb.Query(context.Background(), queryInput)
-		if err != nil {
-			t.Fatalf("Expected no error, got %v", err)
-		}
-		if len(queryOutput.Items) != 2 {
-			t.Fatalf("Expected 2 items, got %d", len(queryOutput.Items))
-		}
-		assertPrimaryKey(queryOutput.Items[0], items[0], t)
-		assertPrimaryKey(queryOutput.Items[1], items[1], t)
-
-	}
-
-	// Test query with ScanIndexForward false
-	{
-		queryInput := &dynamodb.QueryInput{
-			TableName:              aws.String("movie"),
-			KeyConditionExpression: aws.String("regionCode = :regionCode"),
-			ExpressionAttributeValues: map[string]types.AttributeValue{
-				":regionCode": &types.AttributeValueMemberS{Value: "1"},
-			},
-			ScanIndexForward: aws.Bool(false),
-			Limit:            aws.Int32(2),
-			IndexName:        aws.String("regionGSI"),
-		}
-		queryOutput, err := ddb.Query(context.Background(), queryInput)
-		if err != nil {
-			t.Fatalf("Expected no error, got %v", err)
-		}
-		if len(queryOutput.Items) != 2 {
-			t.Fatalf("Expected 2 items, got %d", len(queryOutput.Items))
-		}
-		assertPrimaryKey(queryOutput.Items[0], items[3], t)
-		assertPrimaryKey(queryOutput.Items[1], items[2], t)
-	}
-
-	// Test query with ExclusiveStartKey
-	{
-		queryInput := &dynamodb.QueryInput{
-			TableName:              aws.String("movie"),
-			KeyConditionExpression: aws.String("regionCode = :regionCode"),
-			ExpressionAttributeValues: map[string]types.AttributeValue{
-				":regionCode": &types.AttributeValueMemberS{Value: "1"},
-			},
-			ScanIndexForward: aws.Bool(true),
-			Limit:            aws.Int32(2),
-			IndexName:        aws.String("regionGSI"),
-			ExclusiveStartKey: map[string]types.AttributeValue{
-				"year":  &types.AttributeValueMemberN{Value: "2025"},
-				"title": &types.AttributeValueMemberS{Value: "Hello World 1"},
-			},
-		}
-		queryOutput, err := ddb.Query(context.Background(), queryInput)
-		if err != nil {
-			t.Fatalf("Expected no error, got %v", err)
-		}
-		if len(queryOutput.Items) != 2 {
-			t.Fatalf("Expected 2 items, got %d", len(queryOutput.Items))
-		}
-		assertPrimaryKey(queryOutput.Items[0], items[2], t)
-		assertPrimaryKey(queryOutput.Items[1], items[3], t)
-	}
-
-	// Test query with SortKeyPredicate
-	{
-		queryInput := &dynamodb.QueryInput{
-			TableName:              aws.String("movie"),
-			KeyConditionExpression: aws.String("regionCode = :regionCode AND countryCode = :countryCode"),
-			ExpressionAttributeValues: map[string]types.AttributeValue{
-				":regionCode":  &types.AttributeValueMemberS{Value: "1"},
-				":countryCode": &types.AttributeValueMemberS{Value: "code2"},
-			},
-			ScanIndexForward: aws.Bool(true),
-			Limit:            aws.Int32(2),
-			IndexName:        aws.String("regionGSI"),
-		}
-		queryOutput, err := ddb.Query(context.Background(), queryInput)
-		if err != nil {
-			t.Fatalf("Expected no error, got %v", err)
-		}
-		if len(queryOutput.Items) != 1 {
-			t.Fatalf("Expected 1 items, got %d", len(queryOutput.Items))
-		}
-		assertPrimaryKey(queryOutput.Items[0], items[2], t)
-	}
-}
-
 func assertPrimaryKey(actual map[string]types.AttributeValue, expected map[string]types.AttributeValue, t *testing.T) {
 	t.Helper()
 	if actual["year"].(*types.AttributeValueMemberN).Value != expected["year"].(*types.AttributeValueMemberN).Value {
@@ -482,408 +244,27 @@ func assertPrimaryKey(actual map[string]types.AttributeValue, expected map[strin
 	}
 }
 
-func TestQuery(t *testing.T) {
-	shutdown := startServer()
-	defer shutdown()
-	ddb := newDdbClient()
-	_, err := createTable(ddb, 5, 5)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-
-	items := make([]map[string]types.AttributeValue, 0)
-	// Insert test data
-	for i := 0; i < 4; i++ {
-		putItemInput := &dynamodb.PutItemInput{
-			Item: map[string]types.AttributeValue{
-				"year":  &types.AttributeValueMemberN{Value: "2025"},
-				"title": &types.AttributeValueMemberS{Value: fmt.Sprintf("Hello World %d", i)},
-			},
-			TableName: aws.String("movie"),
-		}
-		items = append(items, putItemInput.Item)
-
-		_, err := ddb.PutItem(context.Background(), putItemInput)
-		if err != nil {
-			t.Fatalf("Expected no error, got %v", err)
-		}
-	}
-
-	// Test query with ScanIndexForward true
-	{
-		queryInput := &dynamodb.QueryInput{
-			TableName:              aws.String("movie"),
-			KeyConditionExpression: aws.String("#year = :year"),
-			ExpressionAttributeNames: map[string]string{
-				"#year": "year",
-			},
-			ExpressionAttributeValues: map[string]types.AttributeValue{
-				":year": &types.AttributeValueMemberN{Value: "2025"},
-			},
-			ScanIndexForward: aws.Bool(true),
-			Limit:            aws.Int32(2),
-			ConsistentRead:   aws.Bool(true),
-		}
-
-		queryOutput, err := ddb.Query(context.Background(), queryInput)
-		if err != nil {
-			t.Fatalf("Expected no error, got %v", err)
-		}
-
-		if len(queryOutput.Items) != 2 {
-			t.Fatalf("Expected 2 items, got %d", len(queryOutput.Items))
-		}
-		assertPrimaryKey(queryOutput.Items[0], items[0], t)
-		assertPrimaryKey(queryOutput.Items[1], items[1], t)
-	}
-
-	// Test query with ScanIndexForward false
-	{
-		queryInput := &dynamodb.QueryInput{
-			TableName:              aws.String("movie"),
-			KeyConditionExpression: aws.String("#year = :year"),
-			ExpressionAttributeNames: map[string]string{
-				"#year": "year",
-			},
-			ExpressionAttributeValues: map[string]types.AttributeValue{
-				":year": &types.AttributeValueMemberN{Value: "2025"},
-			},
-			ScanIndexForward: aws.Bool(false),
-			Limit:            aws.Int32(2),
-			ConsistentRead:   aws.Bool(true),
-		}
-
-		queryOutput, err := ddb.Query(context.Background(), queryInput)
-		if err != nil {
-			t.Fatalf("Expected no error, got %v", err)
-		}
-
-		if len(queryOutput.Items) != 2 {
-			t.Fatalf("Expected 2 items, got %d", len(queryOutput.Items))
-		}
-		assertPrimaryKey(queryOutput.Items[0], items[3], t)
-		assertPrimaryKey(queryOutput.Items[1], items[2], t)
-	}
-
-	// Test query with ExclusiveStartKey
-	{
-		queryInput := &dynamodb.QueryInput{
-			TableName:              aws.String("movie"),
-			KeyConditionExpression: aws.String("#year = :year"),
-			ExpressionAttributeNames: map[string]string{
-				"#year": "year",
-			},
-			ExpressionAttributeValues: map[string]types.AttributeValue{
-				":year": &types.AttributeValueMemberN{Value: "2025"},
-			},
-			ScanIndexForward: aws.Bool(true),
-			Limit:            aws.Int32(2),
-			ConsistentRead:   aws.Bool(true),
-			ExclusiveStartKey: map[string]types.AttributeValue{
-				"year":  &types.AttributeValueMemberN{Value: "2025"},
-				"title": &types.AttributeValueMemberS{Value: "Hello World 1"},
-			},
-		}
-
-		queryOutput, err := ddb.Query(context.Background(), queryInput)
-		if err != nil {
-			t.Fatalf("Expected no error, got %v", err)
-		}
-
-		if len(queryOutput.Items) != 2 {
-			t.Fatalf("Expected 2 items, got %d", len(queryOutput.Items))
-		}
-		assertPrimaryKey(queryOutput.Items[0], items[2], t)
-		assertPrimaryKey(queryOutput.Items[1], items[3], t)
-	}
-}
-
-// TODO: test different failure scenarios
-
-func TestPutWithCondition(t *testing.T) {
-	shutdown := startServer()
-	defer shutdown()
-	ddb := newDdbClient()
-	_, err := createTable(ddb, 5, 5)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-
-	// Insert an item
-	_, err = putItem(ddb)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-
-	// Try to update item with an invalid condition
+func putItem(
+	client *dynamodb.Client,
+	year int,
+	title string,
+	message string,
+	regionCode string,
+	countryCode string,
+) (map[string]types.AttributeValue, error) {
 	putItemInput := &dynamodb.PutItemInput{
 		Item: map[string]types.AttributeValue{
-			"year":       &types.AttributeValueMemberN{Value: "2025"},
-			"title":      &types.AttributeValueMemberS{Value: "Hello World"},
-			"regionCode": &types.AttributeValueMemberS{Value: "1"},
-		},
-		TableName:           aws.String("movie"),
-		ConditionExpression: aws.String("attribute_not_exists(#title)"),
-	}
-
-	_, err = ddb.PutItem(context.Background(), putItemInput)
-	if err == nil {
-		t.Fatalf("Expected Validation error, got nil")
-	} else {
-		if !strings.Contains(err.Error(), "An expression attribute name used in the document path is not defined; attribute name: #title") {
-			t.Fatalf("error message is unexpected, got %v", err)
-		}
-	}
-
-	// Try to update item with a condition that fails
-	putItemInput = &dynamodb.PutItemInput{
-		Item: map[string]types.AttributeValue{
-			"year":       &types.AttributeValueMemberN{Value: "2025"},
-			"title":      &types.AttributeValueMemberS{Value: "Hello World"},
-			"regionCode": &types.AttributeValueMemberS{Value: "1"},
-		},
-		TableName:           aws.String("movie"),
-		ConditionExpression: aws.String("attribute_not_exists(title)"),
-	}
-
-	_, err = ddb.PutItem(context.Background(), putItemInput)
-	if err == nil {
-		t.Fatalf("Expected ConditionalCheckFailedException, got nil")
-	} else {
-		var conditionalCheckFailedException *types.ConditionalCheckFailedException
-		if !errors.As(err, &conditionalCheckFailedException) {
-			t.Fatalf("Expected ConditionalCheckFailedException, got %v", err)
-		}
-	}
-
-	// Try to updated the item with a condition that passes
-	putItemInput = &dynamodb.PutItemInput{
-		Item: map[string]types.AttributeValue{
-			"year":       &types.AttributeValueMemberN{Value: "2025"},
-			"title":      &types.AttributeValueMemberS{Value: "Hello World"},
-			"message":    &types.AttributeValueMemberS{Value: "Jobs done"},
-			"regionCode": &types.AttributeValueMemberS{Value: "1"},
-		},
-		TableName:           aws.String("movie"),
-		ConditionExpression: aws.String("attribute_not_exists(#regionCode) AND contains(#message, :message)"),
-		ExpressionAttributeNames: map[string]string{
-			"#regionCode": "regionCode",
-			"#message":    "message",
-		},
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":message": &types.AttributeValueMemberS{Value: "magic"},
-		},
-	}
-
-	_, err = ddb.PutItem(context.Background(), putItemInput)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-
-	// confirm the item is updated
-	getItemInput := &dynamodb.GetItemInput{
-		Key: map[string]types.AttributeValue{
-			"year":  &types.AttributeValueMemberN{Value: "2025"},
-			"title": &types.AttributeValueMemberS{Value: "Hello World"},
-		},
-		TableName:      aws.String("movie"),
-		ConsistentRead: aws.Bool(true),
-	}
-	getItemOutput, err := ddb.GetItem(context.Background(), getItemInput)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-	if val, ok := getItemOutput.Item["message"]; !ok {
-		t.Fatalf("Expected message to be present, got nil")
-	} else {
-		if val.(*types.AttributeValueMemberS).Value != "Jobs done" {
-			t.Fatalf("Expected message to be Jobs done, got %s", val.(*types.AttributeValueMemberS).Value)
-		}
-	}
-}
-
-func TestDeleteWithCondition(t *testing.T) {
-	shutdown := startServer()
-	defer shutdown()
-	ddb := newDdbClient()
-	_, err := createTable(ddb, 5, 5)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-
-	// Insert an item
-	_, err = putItem(ddb)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-
-	// Try to delete item with a condition that fails
-	deleteItemInput := &dynamodb.DeleteItemInput{
-		Key: map[string]types.AttributeValue{
-			"year":  &types.AttributeValueMemberN{Value: "2025"},
-			"title": &types.AttributeValueMemberS{Value: "Hello World"},
-		},
-		TableName:           aws.String("movie"),
-		ConditionExpression: aws.String("attribute_not_exists(title)"),
-	}
-
-	_, err = ddb.DeleteItem(context.Background(), deleteItemInput)
-	if err == nil {
-		t.Fatalf("Expected ConditionalCheckFailedException, got nil")
-	} else {
-		var conditionalCheckFailedException *types.ConditionalCheckFailedException
-		if !errors.As(err, &conditionalCheckFailedException) {
-			t.Fatalf("Expected ConditionalCheckFailedException, got %v", err)
-		}
-	}
-
-	// Try to delete item with a condition that passes
-	deleteItemInput = &dynamodb.DeleteItemInput{
-		Key: map[string]types.AttributeValue{
-			"year":  &types.AttributeValueMemberN{Value: "2025"},
-			"title": &types.AttributeValueMemberS{Value: "Hello World"},
-		},
-		TableName:           aws.String("movie"),
-		ConditionExpression: aws.String("attribute_exists(title)"),
-	}
-
-	_, err = ddb.DeleteItem(context.Background(), deleteItemInput)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-
-	// Confirm the item is deleted
-	getItemInput := &dynamodb.GetItemInput{
-		Key: map[string]types.AttributeValue{
-			"year":  &types.AttributeValueMemberN{Value: "2025"},
-			"title": &types.AttributeValueMemberS{Value: "Hello World"},
-		},
-		TableName:      aws.String("movie"),
-		ConsistentRead: aws.Bool(true),
-	}
-	getItemOutput, err := ddb.GetItem(context.Background(), getItemInput)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-	if len(getItemOutput.Item) != 0 {
-		t.Fatalf("Expected no item, got %v", len(getItemOutput.Item))
-	}
-}
-
-func TestUpdateItem(t *testing.T) {
-	shutdown := startServer()
-	defer shutdown()
-	ddb := newDdbClient()
-	_, err := createTable(ddb, 5, 5)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-
-	// Insert an item
-	_, err = putItem(ddb)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-
-	// Update the item
-	updateItemInput := &dynamodb.UpdateItemInput{
-		Key: map[string]types.AttributeValue{
-			"year":  &types.AttributeValueMemberN{Value: "2025"},
-			"title": &types.AttributeValueMemberS{Value: "Hello World"},
-		},
-		TableName:        aws.String("movie"),
-		UpdateExpression: aws.String("SET message = :newMessage"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":newMessage": &types.AttributeValueMemberS{Value: "Updated message"},
-		},
-	}
-
-	_, err = ddb.UpdateItem(context.Background(), updateItemInput)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-
-	// Confirm the item is updated
-	getItemInput := &dynamodb.GetItemInput{
-		Key: map[string]types.AttributeValue{
-			"year":  &types.AttributeValueMemberN{Value: "2025"},
-			"title": &types.AttributeValueMemberS{Value: "Hello World"},
-		},
-		TableName:      aws.String("movie"),
-		ConsistentRead: aws.Bool(true),
-	}
-	getItemOutput, err := ddb.GetItem(context.Background(), getItemInput)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-	if val, ok := getItemOutput.Item["message"]; !ok {
-		t.Fatalf("Expected message to be present, got nil")
-	} else {
-		if val.(*types.AttributeValueMemberS).Value != "Updated message" {
-			t.Fatalf("Expected message to be 'Updated message', got %s", val.(*types.AttributeValueMemberS).Value)
-		}
-	}
-}
-
-func TestProvisionedThroughputExceededException(t *testing.T) {
-	shutdown := startServer()
-	defer shutdown()
-
-	var ddb *dynamodb.Client
-	// minimize retries to test provisioned throughput exceeded exception
-	{
-		cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion("us-west-2"))
-		if err != nil {
-			log.Fatalf("unable to load SDK config, %v", err)
-		}
-
-		ddb = dynamodb.NewFromConfig(cfg, func(options *dynamodb.Options) {
-			options.BaseEndpoint = aws.String("http://localhost:8080")
-			options.RetryMaxAttempts = 1
-		})
-	}
-
-	_, err := createTable(ddb, 5, 5)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-
-	// Insert items to exceed provisioned throughput
-	for i := 0; i < 1000; i++ {
-		putItemInput := &dynamodb.PutItemInput{
-			Item: map[string]types.AttributeValue{
-				"year":    &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", 2025+i)},
-				"title":   &types.AttributeValueMemberS{Value: fmt.Sprintf("Hello World %d", i)},
-				"message": &types.AttributeValueMemberS{Value: "your magic is mine"},
-			},
-			TableName: aws.String("movie"),
-		}
-
-		_, err := ddb.PutItem(context.Background(), putItemInput)
-		if err != nil {
-			var provisionedThroughputExceededException *types.ProvisionedThroughputExceededException
-			if errors.As(err, &provisionedThroughputExceededException) {
-				// Expected error
-				return
-			}
-			t.Fatalf("Expected ProvisionedThroughputExceededException, got %v", err)
-		}
-	}
-
-	t.Fatalf("Expected ProvisionedThroughputExceededException, but no error occurred")
-}
-
-func putItem(client *dynamodb.Client) (*dynamodb.PutItemOutput, error) {
-	putItemInput := &dynamodb.PutItemInput{
-		Item: map[string]types.AttributeValue{
-			"year":    &types.AttributeValueMemberN{Value: "2025"},
-			"title":   &types.AttributeValueMemberS{Value: "Hello World"},
-			"message": &types.AttributeValueMemberS{Value: "your magic is mine"},
+			"year":        &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", year)},
+			"title":       &types.AttributeValueMemberS{Value: title},
+			"message":     &types.AttributeValueMemberS{Value: message},
+			"regionCode":  &types.AttributeValueMemberS{Value: regionCode},
+			"countryCode": &types.AttributeValueMemberS{Value: countryCode},
 		},
 		TableName: aws.String("movie"),
 	}
 
-	return client.PutItem(context.Background(), putItemInput)
+	_, err := client.PutItem(context.Background(), putItemInput)
+	return putItemInput.Item, err
 }
 
 func createTable(client *dynamodb.Client, readCapacity int64, writeCapacity int64) (*dynamodb.CreateTableOutput, error) {
@@ -943,6 +324,19 @@ func createTable(client *dynamodb.Client, readCapacity int64, writeCapacity int6
 	return output, nil
 }
 
+func updateProvisionedThroughput(client *dynamodb.Client, readCapacity int64, writeCapacity int64) error {
+	_, err := client.UpdateTable(context.TODO(), &dynamodb.UpdateTableInput{
+		TableName:   aws.String("movie"),
+		BillingMode: types.BillingModeProvisioned,
+		ProvisionedThroughput: &types.ProvisionedThroughput{
+			ReadCapacityUnits:  aws.Int64(readCapacity),
+			WriteCapacityUnits: aws.Int64(writeCapacity),
+		},
+	})
+
+	return err
+}
+
 func updateTestTableMetadata(client *dynamodb.Client, tableDelaySeconds int, gsiDelaySeconds int, unprocessedRequests uint32) {
 	_, err := client.PutItem(context.TODO(), &dynamodb.PutItemInput{
 		Item: map[string]types.AttributeValue{
@@ -967,7 +361,7 @@ func newDdbClient() *dynamodb.Client {
 	// Using the Config value, create the DynamoDB client
 	client := dynamodb.NewFromConfig(cfg, func(options *dynamodb.Options) {
 		options.BaseEndpoint = aws.String("http://localhost:8080")
-		options.Retryer = retry.AddWithMaxAttempts(retry.NewStandard(), 2)
+		options.Retryer = retry.AddWithMaxAttempts(retry.NewStandard(), 1)
 	})
 
 	return client

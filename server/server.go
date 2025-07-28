@@ -226,10 +226,6 @@ func writeResHeaders(bs []byte, w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/x-amz-json-1.0")
 }
 
-type Foo struct {
-	Message string `json:"message"`
-}
-
 func (svr *DdbServer) Handler(w http.ResponseWriter, req *http.Request) {
 	targetActions := req.Header["X-Amz-Target"]
 	if len(targetActions) != 1 {
