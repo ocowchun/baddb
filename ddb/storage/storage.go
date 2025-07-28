@@ -65,9 +65,9 @@ func (m *InnerTableMetadata) Clone() *InnerTableMetadata {
 		clone.GlobalSecondaryIndexSettings = make(map[string]InnerTableGlobalSecondaryIndexSetting)
 		for name, gsi := range m.GlobalSecondaryIndexSettings {
 			clonedGSI := InnerTableGlobalSecondaryIndexSetting{
-				IndexTableName:   gsi.IndexTableName,
-				ProjectionType:   gsi.ProjectionType,
-				readRateLimiter:  gsi.readRateLimiter,
+				IndexTableName:  gsi.IndexTableName,
+				ProjectionType:  gsi.ProjectionType,
+				readRateLimiter: gsi.readRateLimiter,
 			}
 
 			if gsi.PartitionKeyName != nil {
@@ -427,7 +427,7 @@ type Projection struct {
 	NonKeyAttributes []string
 }
 
-func (s *InnerStorage) RunGSIUpdates(tableName string, operations []GSIOperation) error {
+func (s *InnerStorage) UpdateTable(tableName string, readCapacity int, writeCapacity int, newBillingMode core.BillingMode, operations []GSIOperation) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -438,6 +438,12 @@ func (s *InnerStorage) RunGSIUpdates(tableName string, operations []GSIOperation
 
 	// Clone metadata for atomic updates - rollback on failure
 	clonedMetadata := tableMetadata.Clone()
+
+	clonedMetadata.readCapacityUnits = readCapacity * 2
+	clonedMetadata.writeCapacityUnits = writeCapacity
+	clonedMetadata.readRateLimiter = rate.NewLimiter(rate.Limit(readCapacity*2), readCapacity*2)
+	clonedMetadata.writeRateLimiter = rate.NewLimiter(rate.Limit(writeCapacity), writeCapacity)
+	clonedMetadata.billingMode = newBillingMode
 
 	// Begin transaction for atomic operation
 	tx, err := s.db.Begin()
@@ -481,7 +487,7 @@ func (s *InnerStorage) executeGSICreateInTx(tx *sql.Tx, tableMetadata *InnerTabl
 	// Generate unique GSI table name
 	gsiTableName := s.newGsiTableName()
 
-	// Create GSI table with same schema as during table creation
+	// Create GSI table with the same schema as during table creation
 	createTableSQL := `
 		create table ` + gsiTableName + ` (primary_key blob not null primary key, body blob, main_partition_key blob, main_sort_key blob, partition_key blob, sort_key blob, shard_id integer);
 		create index idx_` + gsiTableName + `_partition_key_sort_key on ` + gsiTableName + `(partition_key, sort_key);
@@ -492,11 +498,11 @@ func (s *InnerStorage) executeGSICreateInTx(tx *sql.Tx, tableMetadata *InnerTabl
 	}
 
 	// Set up rate limiter (default to no rate limiting for PAY_PER_REQUEST)
-	var readLimiter *rate.Limiter
+	readCapacity := 0
 	if action.ProvisionedThroughput != nil {
-		readCapacity := action.ProvisionedThroughput.ReadCapacityUnits * 2
-		readLimiter = rate.NewLimiter(rate.Limit(readCapacity), readCapacity)
+		readCapacity = action.ProvisionedThroughput.ReadCapacityUnits * 2
 	}
+	readLimiter := rate.NewLimiter(rate.Limit(readCapacity), readCapacity)
 
 	// Add to metadata
 	tableMetadata.GlobalSecondaryIndexSettings[gsiName] = InnerTableGlobalSecondaryIndexSetting{
@@ -523,14 +529,13 @@ func (s *InnerStorage) executeGSIUpdateInTx(tx *sql.Tx, tableMetadata *InnerTabl
 	}
 
 	// Update rate limiter based on throughput settings
+
+	readCapacity := 0
 	if action.ProvisionedThroughput != nil {
 		// PROVISIONED mode - set rate limiter
-		readCapacity := action.ProvisionedThroughput.ReadCapacityUnits * 2
-		gsiSetting.readRateLimiter = rate.NewLimiter(rate.Limit(readCapacity), readCapacity)
-	} else {
-		// PAY_PER_REQUEST mode - disable rate limiting
-		gsiSetting.readRateLimiter = nil
+		readCapacity = action.ProvisionedThroughput.ReadCapacityUnits * 2
 	}
+	gsiSetting.readRateLimiter = rate.NewLimiter(rate.Limit(readCapacity), readCapacity)
 
 	// Update metadata (in memory, committed with transaction)
 	tableMetadata.GlobalSecondaryIndexSettings[gsiName] = gsiSetting

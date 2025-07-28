@@ -1,5 +1,6 @@
-## nightly
+## 0.2.8 / 2025-07-28
 * validate table and index names 
+* Fix `UpdateTable`, update inner storage `ProvisionedThroughput` setting.
 
 ## 0.2.7 / 2025-07-23
 * Support `UpdateTable` 

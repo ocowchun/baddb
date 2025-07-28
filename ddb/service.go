@@ -747,6 +747,12 @@ func (svc *Service) UpdateTable(ctx context.Context, input *dynamodb.UpdateTable
 		}
 	}
 
+	err := svc.updateInnerStorage(tableName, input)
+	if err != nil {
+		svc.tableMetadataStore[tableName] = originalTable
+		return nil, err
+	}
+
 	itemCount, err := svc.storage.QueryItemCount(tableName)
 	if err != nil {
 		svc.tableMetadataStore[tableName] = originalTable
@@ -761,46 +767,8 @@ func (svc *Service) UpdateTable(ctx context.Context, input *dynamodb.UpdateTable
 	return output, nil
 }
 
-func (svc *Service) processGSIUpdates(table *core.TableMetaData, updates []types.GlobalSecondaryIndexUpdate) error {
-	// Phase 1: Validate ALL operations first (fail fast)
-	for _, update := range updates {
-		if update.Create != nil {
-			if err := svc.validateGSICreate(table, update.Create); err != nil {
-				return err
-			}
-		}
-		if update.Update != nil {
-			if err := svc.validateGSIUpdate(table, update.Update); err != nil {
-				return err
-			}
-		}
-		if update.Delete != nil {
-			if err := svc.validateGSIDelete(table, update.Delete); err != nil {
-				return err
-			}
-		}
-	}
-
-	// Phase 2: Update metadata first (fail fast - cheaper operation)
-	for _, update := range updates {
-		if update.Create != nil {
-			if err := svc.addGSIToTableMetadata(table, update.Create); err != nil {
-				return err
-			}
-		}
-		if update.Update != nil {
-			if err := svc.updateGSIInTableMetadata(table, update.Update); err != nil {
-				return err
-			}
-		}
-		if update.Delete != nil {
-			if err := svc.removeGSIFromTableMetadata(table, update.Delete); err != nil {
-				return err
-			}
-		}
-	}
-
-	// Phase 3: Execute all storage operations atomically (expensive operation)
+func (svc *Service) updateInnerStorage(tableName string, input *dynamodb.UpdateTableInput) error {
+	updates := input.GlobalSecondaryIndexUpdates
 	storageOperations := make([]storage.GSIOperation, 0, len(updates))
 
 	for _, update := range updates {
@@ -841,9 +809,61 @@ func (svc *Service) processGSIUpdates(table *core.TableMetaData, updates []types
 		}
 	}
 
-	// Execute all operations atomically in storage
-	if err := svc.storage.RunGSIUpdates(table.Name, storageOperations); err != nil {
+	newBillingMode := core.BILLING_MODE_PAY_PER_REQUEST
+	if input.BillingMode == types.BillingModeProvisioned {
+		newBillingMode = core.BILLING_MODE_PROVISIONED
+	}
+	readCapacity := 0
+	writeCapacity := 0
+	if input.ProvisionedThroughput != nil {
+		readCapacity = int(*input.ProvisionedThroughput.ReadCapacityUnits)
+		writeCapacity = int(*input.ProvisionedThroughput.WriteCapacityUnits)
+	}
+
+	if err := svc.storage.UpdateTable(tableName, readCapacity, writeCapacity, newBillingMode, storageOperations); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func (svc *Service) processGSIUpdates(table *core.TableMetaData, updates []types.GlobalSecondaryIndexUpdate) error {
+	// Phase 1: Validate ALL operations first (fail fast)
+	for _, update := range updates {
+		if update.Create != nil {
+			if err := svc.validateGSICreate(table, update.Create); err != nil {
+				return err
+			}
+		}
+		if update.Update != nil {
+			if err := svc.validateGSIUpdate(table, update.Update); err != nil {
+				return err
+			}
+		}
+		if update.Delete != nil {
+			if err := svc.validateGSIDelete(table, update.Delete); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Phase 2: Update metadata first (fail fast - cheaper operation)
+	for _, update := range updates {
+		if update.Create != nil {
+			if err := svc.addGSIToTableMetadata(table, update.Create); err != nil {
+				return err
+			}
+		}
+		if update.Update != nil {
+			if err := svc.updateGSIInTableMetadata(table, update.Update); err != nil {
+				return err
+			}
+		}
+		if update.Delete != nil {
+			if err := svc.removeGSIFromTableMetadata(table, update.Delete); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil
