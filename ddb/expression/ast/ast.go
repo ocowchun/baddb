@@ -3,6 +3,7 @@ package ast
 import (
 	"bytes"
 	"fmt"
+
 	"github.com/ocowchun/baddb/ddb/expression/token"
 )
 
@@ -79,7 +80,7 @@ func (avi *AttributeValueIdentifier) TokenLiteral() string {
 	return avi.Token.Literal
 }
 func (avi *AttributeValueIdentifier) String() string {
-	return fmt.Sprintf(":%s", avi.Name)
+	return avi.Token.Literal
 }
 
 // https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_Query.html#DDB-Query-request-KeyConditionExpression

@@ -2,9 +2,10 @@ package core
 
 import (
 	"errors"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"regexp"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
 type KeySchema struct {
@@ -49,6 +50,15 @@ type TableMetaData struct {
 	PartitionKeySchema           *KeySchema
 	SortKeySchema                *KeySchema
 	BillingMode                  BillingMode
+}
+
+func (m *TableMetaData) GetGlobalSecondaryIndexSetting(indexName string) (GlobalSecondaryIndexSetting, bool) {
+	for _, setting := range m.GlobalSecondaryIndexSettings {
+		if setting.IndexName != nil && *setting.IndexName == indexName {
+			return setting, true
+		}
+	}
+	return GlobalSecondaryIndexSetting{}, false
 }
 
 func (m *TableMetaData) FindKeySchema(attributeName string) *KeySchema {

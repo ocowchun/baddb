@@ -2,10 +2,11 @@ package integration
 
 import (
 	"context"
+	"testing"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"testing"
 )
 
 func TestQueryByPartitionKey(t *testing.T) {
@@ -111,7 +112,7 @@ func TestQueryByPartitionKeyWithInvalidInput(t *testing.T) {
 			},
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &dynamodb.QueryInput{
@@ -348,8 +349,14 @@ func TestQueryGSI(t *testing.T) {
 	}
 
 	for _, item := range queryTestItems() {
-		_, _ = putItemRaw(ddbLocal, item)
-		_, _ = putItemRaw(baddb, item)
+		_, err := putItemRaw(ddbLocal, item)
+		if err != nil {
+			t.Fatalf("failed to put item to ddbLocal: %v", err)
+		}
+		_, err = putItemRaw(baddb, item)
+		if err != nil {
+			t.Fatalf("failed to put item to ddbLocal: %v", err)
+		}
 	}
 
 	input := &dynamodb.QueryInput{
@@ -362,6 +369,7 @@ func TestQueryGSI(t *testing.T) {
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":lang": &types.AttributeValueMemberS{Value: "English"},
 		},
+		Limit: aws.Int32(2),
 	}
 	ddbOut, ddbErr := queryAllPages(ddbLocal, input)
 	baddbOut, baddbErr := queryAllPages(baddb, input)
@@ -386,8 +394,14 @@ func TestQueryPartitionKeyAndSortKey(t *testing.T) {
 	}
 
 	for _, item := range queryTestItems() {
-		_, _ = putItemRaw(ddbLocal, item)
-		_, _ = putItemRaw(baddb, item)
+		_, err := putItemRaw(ddbLocal, item)
+		if err != nil {
+			t.Fatalf("failed to put item to ddbLocal: %v", err)
+		}
+		_, err = putItemRaw(baddb, item)
+		if err != nil {
+			t.Fatalf("failed to put item to ddbLocal: %v", err)
+		}
 	}
 
 	tests := []struct {
@@ -446,10 +460,186 @@ func TestQueryPartitionKeyAndSortKey(t *testing.T) {
 	shutdown()
 }
 
+func TestQueryInvalidCases(t *testing.T) {
+	testContext := setupTest(t)
+	defer testContext.shutdown()
+
+	ddbLocal := testContext.ddbLocal
+	baddb := testContext.baddb
+
+	for _, item := range queryTestItems() {
+		_, _ = putItemRaw(ddbLocal, item)
+		_, _ = putItemRaw(baddb, item)
+	}
+
+	tests := []struct {
+		name  string
+		input *dynamodb.QueryInput
+	}{
+		{
+			name: "invalid partition key in ExclusiveStartKey",
+			input: &dynamodb.QueryInput{
+				TableName:              aws.String("movie"),
+				KeyConditionExpression: aws.String("#year = :year"),
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":year": &types.AttributeValueMemberN{Value: "1994"},
+				},
+				ExpressionAttributeNames: map[string]string{"#year": "year"},
+				ExclusiveStartKey: map[string]types.AttributeValue{
+					"year":  &types.AttributeValueMemberN{Value: "1995"},
+					"title": &types.AttributeValueMemberS{Value: "The Matrix"},
+				},
+			},
+		},
+		{
+			name: "invalid sort key in ExclusiveStartKey",
+			input: &dynamodb.QueryInput{
+				TableName:              aws.String("movie"),
+				KeyConditionExpression: aws.String("#year = :year AND begins_with(title, :prefix)"),
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":year":   &types.AttributeValueMemberN{Value: "1994"},
+					":prefix": &types.AttributeValueMemberS{Value: "The"},
+				},
+				ExpressionAttributeNames: map[string]string{"#year": "year"},
+				ExclusiveStartKey: map[string]types.AttributeValue{
+					"year":  &types.AttributeValueMemberN{Value: "1994"},
+					"title": &types.AttributeValueMemberS{Value: "Cat"},
+				},
+			},
+		},
+		{
+			name: "syntax error in KeyConditionExpression",
+			input: &dynamodb.QueryInput{
+				TableName:              aws.String("movie"),
+				KeyConditionExpression: aws.String("#year = :year foo"),
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":year":   &types.AttributeValueMemberN{Value: "1994"},
+					":prefix": &types.AttributeValueMemberS{Value: "The"},
+				},
+				ExpressionAttributeNames: map[string]string{"#year": "year"},
+			},
+		},
+		// table  hash key: year, range key: title
+		// GSI  hash key: language, range key: year
+		{
+			name: "invalid exclusive start key for GSI",
+			input: &dynamodb.QueryInput{
+				TableName:              aws.String("movie"),
+				IndexName:              aws.String("gsiLanguage"),
+				KeyConditionExpression: aws.String("#language = :language AND #year = :year"),
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":year":     &types.AttributeValueMemberN{Value: "1994"},
+					":language": &types.AttributeValueMemberS{Value: "English"},
+				},
+				ExpressionAttributeNames: map[string]string{"#year": "year", "#language": "language"},
+				Limit:                    aws.Int32(1),
+				ExclusiveStartKey: map[string]types.AttributeValue{
+					"language": &types.AttributeValueMemberS{Value: "English"},
+					"year":     &types.AttributeValueMemberN{Value: "1995"},
+					"title":    &types.AttributeValueMemberS{Value: "Pulp Fiction"},
+				},
+			},
+		},
+		{
+			name: "invalid exclusive start key for GSI 2",
+			input: &dynamodb.QueryInput{
+				TableName:              aws.String("movie"),
+				IndexName:              aws.String("gsiLanguage"),
+				KeyConditionExpression: aws.String("#language = :language AND #year = :year"),
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":year":     &types.AttributeValueMemberN{Value: "1994"},
+					":language": &types.AttributeValueMemberS{Value: "English"},
+				},
+				ExpressionAttributeNames: map[string]string{"#year": "year", "#language": "language"},
+				Limit:                    aws.Int32(1),
+				ExclusiveStartKey: map[string]types.AttributeValue{
+					"language": &types.AttributeValueMemberS{Value: "Japanese"},
+					"year":     &types.AttributeValueMemberN{Value: "1994"},
+					"title":    &types.AttributeValueMemberS{Value: "Pulp Fiction"},
+				},
+			},
+		},
+		{
+			name: "invalid exclusive start key for GSI 3",
+			input: &dynamodb.QueryInput{
+				TableName:              aws.String("movie"),
+				IndexName:              aws.String("gsiLanguage"),
+				KeyConditionExpression: aws.String("#language = :language AND #year = :year"),
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":year":     &types.AttributeValueMemberN{Value: "1994"},
+					":language": &types.AttributeValueMemberS{Value: "English"},
+				},
+				ExpressionAttributeNames: map[string]string{"#year": "year", "#language": "language"},
+				Limit:                    aws.Int32(1),
+				ExclusiveStartKey: map[string]types.AttributeValue{
+					"language": &types.AttributeValueMemberS{Value: "Japanese"},
+					"year":     &types.AttributeValueMemberN{Value: "1994"},
+				},
+			},
+		},
+		{
+			name: "invalid exclusive start key for GSI - missing GSI partition key",
+			input: &dynamodb.QueryInput{
+				TableName:              aws.String("movie"),
+				IndexName:              aws.String("gsiLanguage"),
+				KeyConditionExpression: aws.String("#language = :language AND #year = :year"),
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":year":     &types.AttributeValueMemberN{Value: "1994"},
+					":language": &types.AttributeValueMemberS{Value: "English"},
+				},
+				ExpressionAttributeNames: map[string]string{"#year": "year", "#language": "language"},
+				Limit:                    aws.Int32(1),
+				ExclusiveStartKey: map[string]types.AttributeValue{
+					"year":  &types.AttributeValueMemberN{Value: "1995"},
+					"title": &types.AttributeValueMemberS{Value: "Pulp Fiction"},
+				},
+			},
+		},
+		{
+			name: "invalid exclusive start key for GSI - missing GSI sort key",
+			input: &dynamodb.QueryInput{
+				TableName:              aws.String("movie"),
+				IndexName:              aws.String("gsiLanguage"),
+				KeyConditionExpression: aws.String("#language = :language AND #year = :year"),
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":year":     &types.AttributeValueMemberN{Value: "1994"},
+					":language": &types.AttributeValueMemberS{Value: "English"},
+				},
+				ExpressionAttributeNames: map[string]string{"#year": "year", "#language": "language"},
+				Limit:                    aws.Int32(1),
+				ExclusiveStartKey: map[string]types.AttributeValue{
+					"language": &types.AttributeValueMemberS{Value: "Japanese"},
+					"title":    &types.AttributeValueMemberS{Value: "Pulp Fiction"},
+				},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			input := test.input
+			ddbOut, ddbErr := queryAllPages(ddbLocal, input)
+			baddbOut, baddbErr := queryAllPages(baddb, input)
+
+			if ddbOut != nil || baddbOut != nil {
+				t.Fatalf("expected no items, got ddbOut=%v, baddbOut=%v", ddbOut, baddbOut)
+			}
+
+			if ddbErr == nil || baddbErr == nil {
+				t.Fatalf("unexpected error: ddbErr=%v, baddbErr=%v", ddbErr, baddbErr)
+			}
+			if !compareWithoutRequestID(ddbErr.Error(), baddbErr.Error()) {
+				t.Fatalf("Query errors differ: ddbErr=%s, baddbErr=%s", ddbErr.Error(), baddbErr.Error())
+			}
+		})
+
+	}
+}
+
 // Helper to query all pages and collect items
 func queryAllPages(client *dynamodb.Client, baseInput *dynamodb.QueryInput) ([]map[string]types.AttributeValue, error) {
 	var allItems []map[string]types.AttributeValue
-	var lastKey map[string]types.AttributeValue
+	lastKey := baseInput.ExclusiveStartKey
 	for {
 		input := &dynamodb.QueryInput{
 			TableName:                 baseInput.TableName,
@@ -459,6 +649,7 @@ func queryAllPages(client *dynamodb.Client, baseInput *dynamodb.QueryInput) ([]m
 			ExpressionAttributeNames:  baseInput.ExpressionAttributeNames,
 			ExpressionAttributeValues: baseInput.ExpressionAttributeValues,
 			Limit:                     baseInput.Limit,
+			ExclusiveStartKey:         baseInput.ExclusiveStartKey,
 		}
 		if lastKey != nil {
 			input.ExclusiveStartKey = lastKey

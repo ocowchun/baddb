@@ -2,10 +2,11 @@ package update
 
 import (
 	"fmt"
+	"strconv"
+
 	"github.com/ocowchun/baddb/ddb/core"
 	"github.com/ocowchun/baddb/ddb/expression"
 	"github.com/ocowchun/baddb/ddb/expression/ast"
-	"strconv"
 )
 
 type UpdateOperation struct {
@@ -262,7 +263,7 @@ func (o *UpdateOperation) buildPath(operand ast.PathOperand) (core.PathOperand, 
 	switch operand := operand.(type) {
 	case *ast.AttributeNameOperand:
 		if operand.HasSharp {
-			key := "#" + operand.Identifier.TokenLiteral()
+			key := operand.Identifier.TokenLiteral()
 			name, ok := o.expressionAttributeNames[key]
 			if !ok {
 				msg := fmt.Sprintf("An expression attribute name used in the document path is not defined; attribute name: %s", key)

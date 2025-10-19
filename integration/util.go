@@ -4,11 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"github.com/ocowchun/baddb/server"
 	"log"
 	"math"
 	"net/http"
@@ -17,6 +12,12 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/ocowchun/baddb/server"
 )
 
 const (
@@ -87,10 +88,15 @@ func createTable(client *dynamodb.Client) (*dynamodb.CreateTableOutput, error) {
 		}},
 		GlobalSecondaryIndexes: []types.GlobalSecondaryIndex{{
 			IndexName: aws.String("gsiLanguage"),
-			KeySchema: []types.KeySchemaElement{{
-				AttributeName: aws.String("language"),
-				KeyType:       types.KeyTypeHash,
-			},
+			KeySchema: []types.KeySchemaElement{
+				{
+					AttributeName: aws.String("language"),
+					KeyType:       types.KeyTypeHash,
+				},
+				{
+					AttributeName: aws.String("year"),
+					KeyType:       types.KeyTypeRange,
+				},
 			},
 			Projection: &types.Projection{ProjectionType: types.ProjectionTypeAll},
 			// TODO: add check

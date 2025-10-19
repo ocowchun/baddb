@@ -1,9 +1,10 @@
 package lexer
 
 import (
-	"github.com/ocowchun/baddb/ddb/expression/token"
 	"strings"
 	"testing"
+
+	"github.com/ocowchun/baddb/ddb/expression/token"
 )
 
 func TestLexer_NextToken(t *testing.T) {
@@ -17,28 +18,22 @@ Id = :v1 AND PostedBy BETWEEN :v2a AND :v2b SET #pr.#5star[1] = :r5
 	}{
 		{token.IDENT, "Id"},
 		{token.EQ, "="},
-		{token.COLON, ":"},
-		{token.IDENT, "v1"},
+		{token.EXPRESSION_ATTRIBUTE_VALUE, ":v1"},
 		{token.AND, "AND"},
 		{token.IDENT, "PostedBy"},
 		{token.BETWEEN, "BETWEEN"},
-		{token.COLON, ":"},
-		{token.IDENT, "v2a"},
+		{token.EXPRESSION_ATTRIBUTE_VALUE, ":v2a"},
 		{token.AND, "AND"},
-		{token.COLON, ":"},
-		{token.IDENT, "v2b"},
+		{token.EXPRESSION_ATTRIBUTE_VALUE, ":v2b"},
 		{token.SET, "SET"},
-		{token.SHARP, "#"},
-		{token.IDENT, "pr"},
+		{token.EXPRESSION_ATTRIBUTE_NAME, "#pr"},
 		{token.DOT, "."},
-		{token.SHARP, "#"},
-		{token.IDENT, "5star"},
+		{token.EXPRESSION_ATTRIBUTE_NAME, "#5star"},
 		{token.LBRACKET, "["},
 		{token.INT, "1"},
 		{token.RBRACKET, "]"},
 		{token.EQ, "="},
-		{token.COLON, ":"},
-		{token.IDENT, "r5"},
+		{token.EXPRESSION_ATTRIBUTE_VALUE, ":r5"},
 		{token.EOF, ""},
 	}
 

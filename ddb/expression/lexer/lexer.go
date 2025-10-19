@@ -4,9 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/ocowchun/baddb/ddb/expression/token"
 	"io"
 	"unicode"
+
+	"github.com/ocowchun/baddb/ddb/expression/token"
 )
 
 type Lexer struct {
@@ -95,8 +96,21 @@ func (l *Lexer) NextToken() token.Token {
 		tok = newToken(token.DOT, ".")
 	case ':':
 		tok = newToken(token.COLON, ":")
+		if peek, ok := l.peekRune(); ok && !unicode.IsSpace(peek) {
+			l.readRune()
+			literal := l.readIdentifier()
+			tok = newToken(token.EXPRESSION_ATTRIBUTE_VALUE, fmt.Sprintf(":%s", literal))
+			return tok
+		}
+
 	case '#':
 		tok = newToken(token.SHARP, "#")
+		if peek, ok := l.peekRune(); ok && !unicode.IsSpace(peek) {
+			l.readRune()
+			literal := l.readIdentifier()
+			tok = newToken(token.EXPRESSION_ATTRIBUTE_NAME, fmt.Sprintf("#%s", literal))
+			return tok
+		}
 	case '+':
 		tok = newToken(token.PLUS, "+")
 	case '-':

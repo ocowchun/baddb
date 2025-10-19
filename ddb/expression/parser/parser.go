@@ -3,12 +3,13 @@ package parser
 import (
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
+
 	"github.com/ocowchun/baddb/ddb/core"
 	"github.com/ocowchun/baddb/ddb/expression/ast"
 	"github.com/ocowchun/baddb/ddb/expression/lexer"
 	"github.com/ocowchun/baddb/ddb/expression/token"
-	"strconv"
-	"strings"
 )
 
 type Parser struct {
@@ -52,6 +53,9 @@ func (p *Parser) ParseKeyConditionExpression() (*ast.KeyConditionExpression, err
 			return nil, &InvalidKeyConditionExpressionError{rawErr: err}
 		}
 		keyCondExpression.Predicate2 = predicate2
+	} else if !p.peekTokenIs(token.EOF) {
+		rawErr := fmt.Errorf("Syntax error; token: \"%s\", near: \"%s %s\"", p.peekToken.Literal, p.curToken.Literal, p.peekToken.Literal)
+		return nil, &InvalidKeyConditionExpressionError{rawErr: rawErr}
 	}
 
 	return keyCondExpression, nil
@@ -66,7 +70,7 @@ var KeyConditionComparatorMap = map[string]bool{
 }
 
 func (p *Parser) parseKeyPredicateExpression() (ast.PredicateExpression, error) {
-	if p.curTokenIs(token.IDENT) || p.curTokenIs(token.SHARP) {
+	if p.curTokenIs(token.IDENT) || p.curTokenIs(token.EXPRESSION_ATTRIBUTE_NAME) {
 		attributeName, err := p.parseAttributeName()
 		if err != nil {
 			return nil, err
@@ -155,6 +159,9 @@ func (p *Parser) parseKeyPredicateExpression() (ast.PredicateExpression, error) 
 		val, ok := i.(*ast.AttributeValueIdentifier)
 		if !ok {
 			return nil, fmt.Errorf("failed to parse attribute value")
+		}
+		if !p.expectPeek(token.RPAREN) {
+			return nil, errors.New("failed to parse BEGINS_WITH")
 		}
 
 		beginsWithPredicate := &ast.BeginsWithPredicateExpression{
@@ -247,21 +254,13 @@ func (p *Parser) parseIntegerLiteral() (*ast.IntegerLiteral, error) {
 }
 
 func (p *Parser) parseAttributeValueIdentifier() (ast.Expression, error) {
-	avi := &ast.AttributeValueIdentifier{Token: p.curToken}
-	p.nextToken()
-	i, err := p.parseIdentifier()
-	if err != nil {
-		return nil, err
+	if p.curTokenIs(token.EXPRESSION_ATTRIBUTE_VALUE) {
+		identifier := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal[1:]}
+		return &ast.AttributeValueIdentifier{Token: p.curToken, Name: identifier}, nil
+	} else {
+		// TODO: confirm error message
+		return nil, fmt.Errorf("failed to parse attribute value identifier")
 	}
-
-	identifier, ok := i.(*ast.Identifier)
-	if !ok {
-		return nil, fmt.Errorf("failed to parse identifier")
-	}
-
-	avi.Name = identifier
-
-	return avi, nil
 }
 
 // DynamoDB evaluates conditions from left to right using the following precedence rules:
@@ -680,30 +679,14 @@ func (p *Parser) parseAttributeNameOperand() (*ast.AttributeNameOperand, error) 
 		return &ast.AttributeNameOperand{
 			Identifier: identifier,
 		}, nil
-	} else if p.curTokenIs(token.SHARP) {
-		p.nextToken()
-		i, err := p.parseIdentifier()
-		if err != nil {
-			return nil, err
-		}
-		identifier, ok := i.(*ast.Identifier)
-		if !ok {
-			return nil, fmt.Errorf("failed to parse identifier")
-		}
+	} else if p.curTokenIs(token.EXPRESSION_ATTRIBUTE_NAME) {
+		identifier := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal[1:]}
 		return &ast.AttributeNameOperand{
 			Identifier: identifier,
 			HasSharp:   true,
 		}, nil
-	} else if p.curTokenIs(token.COLON) {
-		p.nextToken()
-		i, err := p.parseIdentifier()
-		if err != nil {
-			return nil, err
-		}
-		identifier, ok := i.(*ast.Identifier)
-		if !ok {
-			return nil, fmt.Errorf("failed to parse identifier")
-		}
+	} else if p.curTokenIs(token.EXPRESSION_ATTRIBUTE_VALUE) {
+		identifier := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal[1:]}
 		return &ast.AttributeNameOperand{
 			Identifier: identifier,
 			HasColon:   true,

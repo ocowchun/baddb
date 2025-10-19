@@ -2,11 +2,12 @@ package condition
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
+
 	"github.com/ocowchun/baddb/ddb/core"
 	"github.com/ocowchun/baddb/ddb/expression"
 	"github.com/ocowchun/baddb/ddb/expression/ast"
-	"strconv"
-	"strings"
 )
 
 type ConditionBuilder struct {
@@ -82,7 +83,7 @@ func (b *ConditionBuilder) buildOperand(operand ast.Operand) (Operand, error) {
 	switch operand := operand.(type) {
 	case *ast.AttributeNameOperand:
 		if operand.HasColon {
-			key := ":" + operand.Identifier.TokenLiteral()
+			key := operand.Identifier.TokenLiteral()
 			val, ok := b.expressionAttributeValues[key]
 			if !ok {
 				msg := fmt.Sprintf("An expression attribute name used in the document path is not defined; attribute name: %s", key)
@@ -109,12 +110,13 @@ func (b *ConditionBuilder) buildOperand(operand ast.Operand) (Operand, error) {
 
 }
 
+// TODO: add test
 func (b *ConditionBuilder) buildPath(operand ast.Operand) (*PathOperand, error) {
 	// it's ok to have condition like name = "ben", but is it also ok to have name = lastName?
 	switch operand := operand.(type) {
 	case *ast.AttributeNameOperand:
 		if operand.HasSharp {
-			key := "#" + operand.Identifier.TokenLiteral()
+			key := operand.Identifier.TokenLiteral()
 			name, ok := b.expressionAttributeNames[key]
 			if !ok {
 				msg := fmt.Sprintf("An expression attribute name used in the document path is not defined; attribute name: %s", key)

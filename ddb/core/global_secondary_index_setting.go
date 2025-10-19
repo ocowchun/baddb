@@ -13,6 +13,7 @@ func (gsi GlobalSecondaryIndexSetting) PartitionKeyName() *string {
 	return &gsi.PartitionKeySchema.AttributeName
 }
 
+// SortKeyName returns the name of the sort key if it exists, otherwise nil.
 func (gsi GlobalSecondaryIndexSetting) SortKeyName() *string {
 	if gsi.SortKeySchema != nil {
 		return &gsi.SortKeySchema.AttributeName

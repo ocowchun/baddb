@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/ocowchun/baddb/ddb/condition"
@@ -13,8 +16,6 @@ import (
 	"github.com/ocowchun/baddb/ddb/request"
 	"github.com/ocowchun/baddb/ddb/scan"
 	"github.com/ocowchun/baddb/ddb/storage"
-	"sync"
-	"time"
 )
 
 type Service struct {
@@ -641,6 +642,7 @@ func (svc *Service) Query(ctx context.Context, input *dynamodb.QueryInput) (*dyn
 
 	lastEvaluatedKey := make(map[string]types.AttributeValue)
 	if len(entries) > 0 {
+		// include hashKey, rangeKey, and GSI keys(if query is GSI)
 		lastEntry := entries[len(entries)-1]
 		partitionKeyName := tableMetadata.PartitionKeySchema.AttributeName
 		pk, ok := lastEntry.Body[partitionKeyName]
@@ -655,6 +657,31 @@ func (svc *Service) Query(ctx context.Context, input *dynamodb.QueryInput) (*dyn
 				return nil, fmt.Errorf("can't found sort key in last entry")
 			}
 			lastEvaluatedKey[sortKeyName] = sk.ToDdbAttributeValue()
+		}
+
+		if input.IndexName != nil {
+			gsiSetting, ok := tableMetadata.GetGlobalSecondaryIndexSetting(*input.IndexName)
+			if !ok {
+				return nil, fmt.Errorf("GSI %s not found in table %s", *input.IndexName, tableName)
+			}
+			gsiPkName := gsiSetting.PartitionKeySchema.AttributeName
+			if _, ok := lastEvaluatedKey[gsiPkName]; !ok {
+				gsiPk, ok := lastEntry.Body[gsiPkName]
+				if !ok {
+					return nil, fmt.Errorf("can't found GSI partition key in last entry")
+				}
+				lastEvaluatedKey[gsiPkName] = gsiPk.ToDdbAttributeValue()
+			}
+			if gsiSetting.SortKeySchema != nil {
+				gsiSkName := gsiSetting.SortKeySchema.AttributeName
+				if _, ok := lastEvaluatedKey[gsiSkName]; !ok {
+					gsiSk, ok := lastEntry.Body[gsiSkName]
+					if !ok {
+						return nil, fmt.Errorf("can't found GSI sort key in last entry")
+					}
+					lastEvaluatedKey[gsiSkName] = gsiSk.ToDdbAttributeValue()
+				}
+			}
 		}
 	}
 

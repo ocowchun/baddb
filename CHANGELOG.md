@@ -1,3 +1,7 @@
+## 0.2.10 / 2025-10-19
+* Fix `Query`, return error if exclusiveStartKey is invalid.
+* Fix `Query`, exclusiveStartKey should include GSI keys if query is GSI.
+ 
 ## 0.2.9 / 2025-07-28
 * validate table and index names
 * Fix `UpdateTable`, update inner storage `ProvisionedThroughput` setting.

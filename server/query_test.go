@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"testing"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"testing"
 )
 
 func TestQuery(t *testing.T) {
@@ -247,8 +248,10 @@ func TestQueryWithGsi(t *testing.T) {
 			Limit:            aws.Int32(2),
 			IndexName:        aws.String("regionGSI"),
 			ExclusiveStartKey: map[string]types.AttributeValue{
-				"year":  &types.AttributeValueMemberN{Value: "2025"},
-				"title": &types.AttributeValueMemberS{Value: "Hello World 1"},
+				"year":        &types.AttributeValueMemberN{Value: "2025"},
+				"title":       &types.AttributeValueMemberS{Value: "Hello World 1"},
+				"regionCode":  &types.AttributeValueMemberS{Value: "1"},
+				"countryCode": &types.AttributeValueMemberS{Value: "code1"},
 			},
 		}
 		queryOutput, err := ddb.Query(context.Background(), queryInput)
@@ -297,13 +300,11 @@ func TestQueryWithGsi_ProvisionedThroughputExceededException(t *testing.T) {
 	}
 
 	// Insert test data
-	//items := make([]map[string]types.AttributeValue, 0)
 	for i := 0; i < 20; i++ {
 		_, err := putItem(ddb, 2025, fmt.Sprintf("Hello World %d", i), "message", "1", fmt.Sprintf("code%d", i))
 		if err != nil {
 			t.Fatalf("Expected no error, got %v", err)
 		}
-		//items = append(items, Attributes)
 	}
 
 	{

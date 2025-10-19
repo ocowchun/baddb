@@ -1,9 +1,10 @@
 package parser
 
 import (
-	"github.com/ocowchun/baddb/ddb/expression/lexer"
 	"strings"
 	"testing"
+
+	"github.com/ocowchun/baddb/ddb/expression/lexer"
 )
 
 func TestParseKeyConditionExpression(t *testing.T) {
@@ -24,11 +25,26 @@ func TestParseKeyConditionExpression(t *testing.T) {
 
 		exp, err := p.ParseKeyConditionExpression()
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("unexpected error: %v when parsing %s", err, content)
 		}
 
 		if exp.String() != content {
 			t.Fatalf("expect %s but get %s", content, exp.String())
+		}
+	}
+}
+
+func TestParseKeyConditionExpressionWithInvalidExp(t *testing.T) {
+	keyConditionExpressions := []string{
+		"#year = :year foo",
+	}
+	for _, content := range keyConditionExpressions {
+		l := lexer.New(strings.NewReader(content))
+		p := New(l)
+
+		_, err := p.ParseKeyConditionExpression()
+		if err == nil {
+			t.Fatalf("expect error but get nil, exp: %s", content)
 		}
 	}
 }

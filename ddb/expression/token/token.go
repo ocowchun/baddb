@@ -44,6 +44,8 @@ const (
 	REMOVE
 	ADD
 	DELETE
+	EXPRESSION_ATTRIBUTE_NAME
+	EXPRESSION_ATTRIBUTE_VALUE
 )
 
 func (t TokenType) String() string {
@@ -121,6 +123,10 @@ func (t TokenType) String() string {
 		return "ADD"
 	case DELETE:
 		return "DELETE"
+	case EXPRESSION_ATTRIBUTE_NAME:
+		return "EXPRESSION_ATTRIBUTE_NAME"
+	case EXPRESSION_ATTRIBUTE_VALUE:
+		return "EXPRESSION_ATTRIBUTE_VALUE"
 
 	default:
 		panic(fmt.Sprintf("unknown token type: %d", t))

@@ -1,12 +1,14 @@
 package query
 
 import (
+	"bytes"
 	"fmt"
+	"log"
+
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/ocowchun/baddb/ddb/condition"
 	"github.com/ocowchun/baddb/ddb/core"
 	"github.com/ocowchun/baddb/ddb/expression/ast"
-	"log"
 )
 
 type QueryBuilder struct {
@@ -131,14 +133,22 @@ func (b *QueryBuilder) BuildQuery() (*Query, error) {
 	if len(b.ExclusiveStartKey) > 0 {
 		bs := make([]byte, 0)
 		tablePartitionKey := b.TableMetadata.PartitionKeySchema.AttributeName
+		body := make(map[string]core.AttributeValue)
 		if val, ok := b.ExclusiveStartKey[tablePartitionKey]; ok {
 			attrVal, err := core.TransformDdbAttributeValue(val)
 			if err != nil {
 				return nil, err
 			}
+
 			bs = attrVal.Bytes()
+			body[tablePartitionKey] = attrVal
 		} else {
-			return nil, fmt.Errorf("partition key %s not found in ExclusiveStartKey", tablePartitionKey)
+			return nil, fmt.Errorf("Exclusive Start Key must have same size as table's key schema")
+		}
+
+		// check GSI query exclusive start key
+		if b.IndexName == nil && bytes.Compare(*query.PartitionKey, bs) != 0 {
+			return nil, fmt.Errorf("The provided starting key does not match the range key predicate")
 		}
 
 		if b.TableMetadata.SortKeySchema != nil {
@@ -151,10 +161,64 @@ func (b *QueryBuilder) BuildQuery() (*Query, error) {
 
 				bs = append(bs, []byte("|")...)
 				bs = append(bs, attrVal.Bytes()...)
+				body[tableSortKey] = attrVal
 			} else {
-				return nil, fmt.Errorf("sort key %s not found in ExclusiveStartKey", tableSortKey)
+				return nil, fmt.Errorf("Exclusive Start Key must have same size as table's key schema")
 			}
 		}
+
+		// exclusive start key must include query's partition key
+		if val, ok := b.ExclusiveStartKey[*b.expectedPartitionKey()]; ok {
+			attrVal, err := core.TransformDdbAttributeValue(val)
+			if err != nil {
+				return nil, err
+			}
+			if bytes.Compare(*query.PartitionKey, attrVal.Bytes()) != 0 {
+				return nil, fmt.Errorf("The provided starting key does not match the range key predicate")
+			}
+		} else {
+			return nil, fmt.Errorf("Exclusive Start Key must have same size as table's key schema")
+		}
+
+		if b.expectedSortKey() != nil {
+			if _, ok := b.ExclusiveStartKey[*b.expectedSortKey()]; !ok {
+				return nil, fmt.Errorf("Exclusive Start Key must have same size as table's key schema")
+			}
+		}
+
+		sortKeyPredicate := query.SortKeyPredicate
+		if sortKeyPredicate != nil {
+			match, err := (*sortKeyPredicate)(&core.Entry{
+				Body: body,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if !match {
+				return nil, fmt.Errorf("The provided starting key does not match the range key predicate")
+			}
+
+			if val, ok := b.ExclusiveStartKey[*b.expectedSortKey()]; ok {
+				attrVal, err := core.TransformDdbAttributeValue(val)
+				if err != nil {
+					return nil, err
+				}
+				res, err := attrVal.Compare(body[*b.expectedSortKey()])
+
+				if query.ScanIndexForward && res > 0 {
+					// if exclusive start key includes query's sort key, and query is ascending order,
+					//   exclusive start key's sort key must be less than or equal to the last evaluated key
+					return nil, fmt.Errorf("The provided starting key does not match the range key predicate")
+				} else if !query.ScanIndexForward && res < 0 {
+					// if exclusive start key includes query's sort key, and query is descending order,
+					//   exclusive start key's sort key must be greater than or equal to the last evaluated key
+					return nil, fmt.Errorf("The provided starting key does not match the range key predicate")
+				}
+			} else {
+				return nil, fmt.Errorf("")
+			}
+		}
+
 		query.ExclusiveStartKey = &bs
 	}
 
